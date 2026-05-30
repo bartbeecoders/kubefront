@@ -23,7 +23,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary_name: kube-front.exe
             archive_name: KubeFront
-            archive_ext: zip
+            archive_ext: tar.gz   # Using tar.gz on Windows too for consistency and reliability
 
     runs-on: ${{ matrix.os }}
 
@@ -39,7 +39,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Prepare Linux artifact
+      - name: Prepare artifact (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p dist
@@ -47,13 +47,17 @@ jobs:
           chmod +x dist/${{ matrix.binary_name }}
           tar -czvf dist/${{ matrix.archive_name }}-${{ github.event.release.tag_name }}-${{ matrix.target }}.${{ matrix.archive_ext }} -C dist ${{ matrix.binary_name }}
 
-      - name: Prepare Windows artifact
+      - name: Prepare artifact (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
-          7z a dist/${{ matrix.archive_name }}-${{ github.event.release.tag_name }}-${{ matrix.target }}.${{ matrix.archive_ext }} ./dist/${{ matrix.binary_name }}
+          # Use tar instead of 7z for better reliability on GitHub runners
+          tar -czvf dist/${{ matrix.archive_name }}-${{ github.event.release.tag_name }}-${{ matrix.target }}.${{ matrix.archive_ext }} -C dist ${{ matrix.binary_name }}
+
+      - name: List prepared artifacts
+        run: ls -la dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -66,19 +70,22 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: release-artifacts
           merge-multiple: true
 
-      - name: List downloaded artifacts
-        run: ls -la artifacts/
+      - name: List downloaded files (for debugging)
+        run: |
+          echo "=== Files in release-artifacts ==="
+          find release-artifacts -type f -ls || true
+          ls -la release-artifacts/ || true
 
-      - name: Upload release assets
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
-          # You can also add release notes generation here if desired
+          files: release-artifacts/*
+          # This will attach the files to the release that triggered this workflow
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
