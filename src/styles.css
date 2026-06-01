@@ -1,0 +1,638 @@
+/* ===========================================================================
+   KubeFront theme — modern dark-first UI tuned for ops work.
+   Colors are driven by CSS variables so the Settings page can re-theme live.
+   =========================================================================== */
+
+:root {
+  --accent: #326ce5;
+  --font-scale: 1;
+
+  /* Dark palette (default) */
+  --bg: #14161c;
+  --panel: #1a1c23;
+  --panel-2: #20222a;
+  --panel-3: #262934;
+  --border: #2f323d;
+  --border-soft: #25282f;
+  --text: #e8ebf2;
+  --text-dim: #aab0bf;
+  --text-faint: #757b8a;
+
+  --status-running: #22c55e;
+  --status-pending: #eab308;
+  --status-failed: #ef4444;
+  --status-succeeded: #6495ed;
+  --k3s: #8b5cf6;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f5f8;
+  --panel: #ffffff;
+  --panel-2: #f7f8fa;
+  --panel-3: #eceef2;
+  --border: #d9dce3;
+  --border-soft: #e7e9ee;
+  --text: #1a1d26;
+  --text-dim: #565d6c;
+  --text-faint: #8b91a0;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: calc(13.5px * var(--font-scale));
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* === App shell layout === */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+}
+
+.body-row {
+  display: grid;
+  grid-template-columns: 212px 1fr;
+  min-height: 0;
+}
+.body-row.with-detail {
+  grid-template-columns: 212px 1fr 340px;
+}
+
+/* === Top bar === */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  height: 52px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.brand .logo {
+  font-weight: 700;
+  font-size: 1.15em;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+.brand .sub {
+  color: var(--text-faint);
+  font-size: 0.8em;
+}
+.topbar .sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 12px 2px;
+  background: var(--border);
+}
+.spacer {
+  flex: 1;
+}
+
+/* === Buttons === */
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 11px;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--panel-3);
+  border-color: var(--accent);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+.btn.sm {
+  padding: 3px 8px;
+  font-size: 0.85em;
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.btn.ghost:hover {
+  background: var(--panel-3);
+}
+
+/* === Inputs === */
+.input,
+.select {
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  outline: none;
+}
+.input:focus,
+.select:focus {
+  border-color: var(--accent);
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+/* === Context switcher / status === */
+.ctx-label {
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  font-weight: 500;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot.running {
+  background: var(--status-running);
+}
+.dot.pending {
+  background: var(--status-pending);
+}
+.dot.failed {
+  background: var(--status-failed);
+}
+.k3s-badge {
+  color: var(--k3s);
+  font-weight: 600;
+  font-size: 0.78em;
+  padding: 1px 6px;
+  border: 1px solid var(--k3s);
+  border-radius: 20px;
+  margin-left: 6px;
+}
+
+.error-banner {
+  padding: 8px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  font-size: 0.85em;
+}
+.error-banner .tip {
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* === Sidebar === */
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px 8px 16px;
+}
+.nav-section {
+  margin-top: 10px;
+}
+.nav-heading {
+  color: var(--text-faint);
+  font-size: 0.68em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+}
+.nav-item:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.nav-item.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+.nav-item.active .nav-ico {
+  color: var(--accent);
+}
+.nav-ico {
+  width: 17px;
+  text-align: center;
+  opacity: 0.95;
+}
+
+/* === Main content === */
+.content {
+  overflow: auto;
+  padding: 18px 22px;
+  min-width: 0;
+}
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.page-head h1 {
+  font-size: 1.3em;
+  font-weight: 650;
+  margin: 0;
+}
+.page-head .count {
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.hint {
+  color: var(--text-faint);
+  font-size: 0.82em;
+  margin-top: 10px;
+}
+.empty {
+  color: var(--text-faint);
+  padding: 18px 4px;
+  font-size: 0.9em;
+}
+
+/* === Tables === */
+.table-wrap {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+table.kt {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88em;
+}
+table.kt thead th {
+  text-align: left;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+table.kt tbody td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text);
+}
+table.kt tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--panel-2) 45%, transparent);
+}
+table.kt tbody tr:hover {
+  background: var(--panel-3);
+}
+table.kt tbody tr.selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+table.kt tbody tr.clickable {
+  cursor: pointer;
+}
+td.name,
+th.name {
+  font-weight: 600;
+}
+
+/* Status pills */
+.pill {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 20px;
+  font-size: 0.82em;
+  font-weight: 600;
+}
+.pill.running {
+  color: var(--status-running);
+  background: color-mix(in srgb, var(--status-running) 16%, transparent);
+}
+.pill.pending {
+  color: var(--status-pending);
+  background: color-mix(in srgb, var(--status-pending) 16%, transparent);
+}
+.pill.failed {
+  color: var(--status-failed);
+  background: color-mix(in srgb, var(--status-failed) 16%, transparent);
+}
+.pill.succeeded {
+  color: var(--status-succeeded);
+  background: color-mix(in srgb, var(--status-succeeded) 16%, transparent);
+}
+
+/* === Detail panel === */
+.detail {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+}
+.detail h2 {
+  font-size: 1.05em;
+  margin: 0 0 4px;
+}
+.detail .dim {
+  color: var(--text-dim);
+}
+.detail .kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.88em;
+}
+.detail .kv span:first-child {
+  color: var(--text-dim);
+}
+.detail-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+.detail h2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  background: var(--panel-3);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.72em;
+  color: var(--text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.manifest {
+  margin-top: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre;
+  user-select: text;
+}
+
+/* === Status bar === */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.78em;
+}
+.statusbar .sep {
+  color: var(--border);
+}
+
+/* === Cards / stat grid (monitoring) === */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.stat-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.stat-card .v {
+  font-size: 1.6em;
+  font-weight: 700;
+}
+.stat-card .l {
+  color: var(--text-dim);
+  font-size: 0.82em;
+  margin-top: 2px;
+}
+.health-row {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.health-row .h {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+/* === Settings === */
+.settings {
+  max-width: 760px;
+}
+.field {
+  margin-bottom: 18px;
+}
+.field > label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.field .desc {
+  color: var(--text-faint);
+  font-size: 0.82em;
+  margin-top: 5px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.swatches {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.swatch {
+  width: 40px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--border);
+  cursor: pointer;
+}
+.swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.section-title {
+  font-weight: 650;
+  font-size: 1.05em;
+  margin: 26px 0 6px;
+}
+
+/* === Log windows (floating, draggable) === */
+.logwin {
+  position: fixed;
+  width: 720px;
+  height: 440px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  overflow: hidden;
+  min-width: 380px;
+  min-height: 220px;
+  resize: both;
+}
+.logwin-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+}
+.logwin-head .title {
+  font-weight: 600;
+  font-size: 0.85em;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.logwin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.logwin-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.logline {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-dim);
+}
+.logline.err {
+  color: var(--status-failed);
+}
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85em;
+  color: var(--text-dim);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}

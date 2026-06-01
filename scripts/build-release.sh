@@ -1,35 +1,30 @@
 #!/usr/bin/env bash
 #
-# KubeFront Release Builder + Self-Signed Code Signing (Linux / Cross-compile)
+# KubeFront Release Builder (Linux / native)
 #
-# This script builds a Windows release executable and signs it using osslsigncode.
-# It is intended to be run from Linux/macOS when cross-compiling for Windows.
+# Builds the frontend, compiles the Rust app, and produces native bundles
+# (.deb / .AppImage / .rpm) using the Tauri bundler.
+#
+# Cross-compiling a Tauri app from Linux to Windows is not supported (the
+# WebView2 runtime is Windows-only) — build the Windows artifacts on Windows
+# with scripts/build-release.ps1, or let the Release GitHub workflow do it.
 #
 # Requirements:
-#   - Rust with Windows target: rustup target add x86_64-pc-windows-msvc
-#   - osslsigncode (apt install osslsigncode / brew install osslsigncode)
-#   - A self-signed certificate (generated below)
+#   - Node.js 18+ and npm
+#   - Rust toolchain
+#   - Tauri Linux deps: libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+#       libjavascriptcoregtk-4.1-dev librsvg2-dev libappindicator3-dev patchelf
 #
 # Usage:
 #   ./scripts/build-release.sh
 #   ./scripts/build-release.sh --clean
-#
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="$PROJECT_ROOT/dist"
-TARGET="x86_64-pc-windows-msvc"
-EXE_NAME="kube-front.exe"
-SIGNED_NAME="KubeFront.exe"
-
-CERT_DIR="$PROJECT_ROOT/scripts/certs"
-CERT_PFX="$CERT_DIR/kube-front-selfsigned.pfx"
-CERT_KEY="$CERT_DIR/kube-front-selfsigned.key"
-CERT_CRT="$CERT_DIR/kube-front-selfsigned.crt"
+cd "$PROJECT_ROOT"
 
 CLEAN=false
-
 while [[ $# -gt 0 ]]; do
     case $1 in
         --clean) CLEAN=true; shift ;;
@@ -37,62 +32,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "=== KubeFront Cross-Compile + Self-Signed Signing (Linux) ==="
+echo "=== KubeFront Release Build (Linux) ==="
 
-mkdir -p "$DIST_DIR"
-mkdir -p "$CERT_DIR"
-
-# 1. Generate self-signed certificate if it doesn't exist
-if [[ ! -f "$CERT_PFX" ]]; then
-    echo "[1/5] Generating self-signed code signing certificate..."
-    openssl req -x509 -newkey rsa:2048 -keyout "$CERT_KEY" -out "$CERT_CRT" \
-        -days 1825 -nodes -subj "/CN=KubeFront Self-Signed" \
-        -addext "extendedKeyUsage=codeSigning"
-
-    # Convert to PFX (required by osslsigncode)
-    openssl pkcs12 -export -in "$CERT_CRT" -inkey "$CERT_KEY" \
-        -out "$CERT_PFX" -passout pass:"" -name "KubeFront Code Signing"
-    echo "Self-signed certificate created at: $CERT_PFX"
-else
-    echo "[1/5] Using existing certificate: $CERT_PFX"
-fi
-
-# 2. Clean if requested
 if $CLEAN; then
-    echo "[2/5] Cleaning..."
-    cargo clean
-else
-    echo "[2/5] Skipping clean"
+    echo "[clean] Removing previous build artifacts..."
+    cargo clean --manifest-path src-tauri/Cargo.toml || true
+    rm -rf dist
 fi
 
-# 3. Build for Windows
-echo "[3/5] Building release for Windows ($TARGET)..."
-rustup target add "$TARGET" 2>/dev/null || true
+echo "[1/2] Installing frontend dependencies..."
+npm ci
 
-cargo build --release --target "$TARGET"
+echo "[2/2] Building frontend + Rust app + native bundles..."
+npm run tauri build
 
-SOURCE_EXE="$PROJECT_ROOT/target/$TARGET/release/$EXE_NAME"
-
-if [[ ! -f "$SOURCE_EXE" ]]; then
-    echo "Error: Built executable not found at $SOURCE_EXE"
-    exit 1
-fi
-
-# 4. Sign with osslsigncode
-echo "[4/5] Signing executable with osslsigncode..."
-osslsigncode sign \
-    -pkcs12 "$CERT_PFX" \
-    -pass "" \
-    -n "KubeFront" \
-    -i "https://github.com/your-org/kube-front" \
-    -t "http://timestamp.sectigo.com" \
-    -in "$SOURCE_EXE" \
-    -out "$DIST_DIR/$SIGNED_NAME"
-
-echo "[5/5] Build complete!"
 echo ""
-echo "Signed executable: $DIST_DIR/$SIGNED_NAME"
-echo ""
-echo "Warning: This is a self-signed certificate."
-echo "Windows will show a warning to users."
-echo "For real distribution, obtain a certificate from a trusted CA."
+echo "Build complete. Bundles:"
+ls -R src-tauri/target/release/bundle 2>/dev/null || echo "  (none found — check the tauri build output above)"
