@@ -1,6 +1,6 @@
 [package]
 name = "kube-front"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["KubeFront Contributors"]
 description = "A modern, pure-Rust desktop frontend for K3S and Kubernetes clusters"
