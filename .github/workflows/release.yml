@@ -1,24 +1,35 @@
 name: Release
 
+# Publishes downloadable installers to a GitHub Release.
+#
+# How to cut a release:
+#   1. Bump the version in package.json + src-tauri/tauri.conf.json (e.g. 0.2.0).
+#   2. git tag v0.2.0 && git push origin v0.2.0
+# The workflow then builds Windows + Linux bundles and attaches them to a
+# GitHub Release for that tag (downloadable from the repo's Releases page).
+#
+# You can also run it manually from the Actions tab (workflow_dispatch).
+
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build & bundle (${{ matrix.os }})
+  release:
+    name: Build & publish (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-          - os: windows-latest
-          - os: macos-latest
+          - platform: ubuntu-22.04 # Linux: .deb + .AppImage
+          - platform: windows-latest # Windows: .exe (NSIS) + .msi
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout repository
@@ -33,7 +44,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Tauri system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -53,12 +64,16 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Builds the frontend (beforeBuildCommand), compiles the Rust app, bundles
-      # platform installers (.deb/.AppImage, .msi/.exe, .dmg) and uploads them to
-      # the GitHub Release that triggered this workflow.
-      - name: Build and release Tauri app
+      # Builds the frontend (beforeBuildCommand) + Rust app, bundles installers,
+      # and creates/updates a GitHub Release for the tag with the artifacts
+      # attached. __VERSION__ is taken from src-tauri/tauri.conf.json.
+      - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ github.event.release.id }}
+          tagName: v__VERSION__
+          releaseName: "KubeFront v__VERSION__"
+          releaseBody: "Download the installer for your platform from the assets below."
+          releaseDraft: false
+          prerelease: false
