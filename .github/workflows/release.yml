@@ -91,6 +91,9 @@ jobs:
             -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
           Add-Content -Path $env:GITHUB_ENV -Value "WIN_CERT_THUMB=$($cert.Thumbprint)"
           Write-Host "Created self-signed cert: $($cert.Thumbprint)"
+          # Export the public cert so users can optionally trust the publisher on
+          # machines they control (see README "Installing a release").
+          Export-Certificate -Cert $cert -FilePath "kubefront-windows-signing-pubcert.cer" -Type CERT | Out-Null
 
       - name: Inject Windows signing config into tauri.conf.json
         if: runner.os == 'Windows'
@@ -109,12 +112,27 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            Signing: Windows installers are Authenticode-signed with a self-signed
-            certificate (you'll still see a SmartScreen "unknown publisher" prompt).
-            Linux artifacts have GPG detached signatures (`*.asc`); import
-            `kubefront-linux-signing-pubkey.asc` and run `gpg --verify` to check them.
+            **Windows** installers are Authenticode-signed with a **self-signed**
+            certificate, so SmartScreen will show "Windows protected your PC /
+            unknown publisher" — this is expected and not a sign of infection.
+            Click **More info → Run anyway** to install. To trust the publisher on
+            a machine you control, import the attached
+            `kubefront-windows-signing-pubcert.cer`. See the README's
+            "Installing a release" section for details.
+
+            **Linux** artifacts have GPG detached signatures (`*.asc`). Verify with:
+            `gpg --import kubefront-linux-signing-pubkey.asc` then
+            `gpg --verify <file>.asc <file>`.
           releaseDraft: false
           prerelease: false
+
+      # --- Windows: attach the public signing certificate for optional self-trust ---
+      - name: Upload Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" kubefront-windows-signing-pubcert.cer --clobber
 
       # --- Linux: GPG self-sign the built artifacts and attach signatures + public key ---
       - name: Sign Linux artifacts (GPG, self-signed) and upload signatures

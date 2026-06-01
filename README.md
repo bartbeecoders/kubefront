@@ -67,6 +67,51 @@ it into your home or fix permissions).
 npm run tauri build      # produces installers in src-tauri/target/release/bundle/
 ```
 
+## Installing a release
+
+Prebuilt installers are attached to each [GitHub Release](https://github.com/bartbeecoders/kubefront/releases).
+
+### Windows (`.exe` / `.msi`)
+
+The installers are **self-signed**, not signed by a trusted Certificate Authority.
+Windows SmartScreen will therefore show **"Windows protected your PC / unknown
+publisher"** and may mention potential risk. This is expected for self-signed apps
+(it is *not* a sign the file is infected) — a self-signed certificate cannot remove
+this warning; only a CA-issued (EV / Azure Trusted Signing) certificate can.
+
+To install anyway:
+
+1. Run the `.exe`. On the blue SmartScreen dialog, click **More info → Run anyway**.
+2. If the file was marked "blocked" after download: right-click the `.exe` →
+   **Properties** → tick **Unblock** → **OK**, then run it.
+
+**Optional — trust the publisher on machines you control.** Each release also
+attaches `kubefront-windows-signing-pubcert.cer`. Importing it removes the
+*"unknown publisher"* prompt on that machine (SmartScreen reputation warnings may
+still appear). As an Administrator:
+
+```powershell
+Import-Certificate -FilePath .\kubefront-windows-signing-pubcert.cer `
+  -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\kubefront-windows-signing-pubcert.cer `
+  -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+> The signing certificate is generated fresh for each release, so re-import the
+> new `.cer` when you upgrade. Only do this on machines you own/administer.
+
+### Linux (`.deb` / `.AppImage` / `.rpm`)
+
+Artifacts have GPG detached signatures (`*.asc`). To verify before installing:
+
+```bash
+gpg --import kubefront-linux-signing-pubkey.asc
+gpg --verify KubeFront_<version>_amd64.AppImage.asc KubeFront_<version>_amd64.AppImage
+```
+
+Then install the `.deb` (`sudo apt install ./KubeFront_*.deb`), make the
+`.AppImage` executable (`chmod +x`), or install the `.rpm`.
+
 ## Development
 
 ```bash
