@@ -145,6 +145,12 @@ pub struct ColorSchemeInfo {
     pub hex: String,
 }
 
+/// Absolute path to the debug log file (shown in Settings so users can find it).
+#[tauri::command]
+pub fn log_path() -> Option<String> {
+    crate::log_file_path().map(|p| p.display().to_string())
+}
+
 /// All selectable color-scheme presets (key, label, hex) for the Settings swatches.
 #[tauri::command]
 pub fn color_schemes() -> Vec<ColorSchemeInfo> {

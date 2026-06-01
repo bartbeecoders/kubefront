@@ -1,7 +1,7 @@
 {
   "name": "kube-front",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "A modern desktop frontend for K3S & Kubernetes clusters (Tauri + React).",
   "scripts": {

@@ -124,6 +124,27 @@ RUST_LOG=debug,kube=info npm run tauri dev      # verbose backend logs
 > The Rust crate embeds the built frontend (`dist/`) via `generate_context!`. Run `npm run build`
 > once before `cargo clippy`/`cargo build` so `dist/` exists.
 
+### Logs & troubleshooting
+
+KubeFront writes a debug log to a file on every platform (the console isn't
+available in the Windows release build), and shows its exact path in
+**Settings → Log level → "Log file:"**. Default locations:
+
+| OS | Log file |
+|----|----------|
+| Linux | `~/.local/share/KubeFront/logs/kubefront.log` |
+| Windows | `%LOCALAPPDATA%\kube-front\KubeFront\data\logs\kubefront.log` |
+| macOS | `~/Library/Application Support/dev.kube-front.app/logs/kubefront.log` |
+
+To capture a verbose log (e.g. to debug a connection/kubeconfig problem):
+
+1. In the app, set **Settings → Log level → DEBUG**, then restart KubeFront and
+   reproduce the issue — no environment variable needed.
+2. Open the log file shown in Settings.
+
+`RUST_LOG` still overrides the level when running from a terminal, e.g.
+`RUST_LOG=debug,kube=debug npm run tauri dev`.
+
 ## Roadmap
 
 Post-feature-parity ideas:

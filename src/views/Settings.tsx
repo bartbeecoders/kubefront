@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
 import type { AppState, ColorSchemeInfo, ThemeMode } from "../types";
 
 interface Props {
@@ -27,6 +29,11 @@ function rgbToHex(rgb: [number, number, number]): string {
 
 export function SettingsView(props: Props) {
   const { settings, schemes, onChange } = props;
+
+  const [logPath, setLogPath] = useState<string | null>(null);
+  useEffect(() => {
+    api.logPath().then(setLogPath).catch(() => {});
+  }, []);
 
   const currentAccentHex = settings.custom_accent
     ? rgbToHex(settings.custom_accent)
@@ -228,13 +235,21 @@ export function SettingsView(props: Props) {
           value={settings.log_level}
           onChange={(e) => onChange({ log_level: e.target.value })}
         >
-          {["debug", "info", "warn", "error"].map((l) => (
+          {["trace", "debug", "info", "warn", "error"].map((l) => (
             <option key={l} value={l}>
               {l.toUpperCase()}
             </option>
           ))}
         </select>
         <div className="desc">Takes effect after restart (respects RUST_LOG if set).</div>
+        {logPath && (
+          <div className="desc">
+            Log file:{" "}
+            <span className="mono" style={{ userSelect: "text" }}>
+              {logPath}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="detail-sep" />

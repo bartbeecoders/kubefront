@@ -18,6 +18,7 @@ export const api = {
   saveSettings: (settings: AppState) => invoke<void>("save_settings", { settings }),
   resolvedAccent: () => invoke<string>("resolved_accent"),
   colorSchemes: () => invoke<ColorSchemeInfo[]>("color_schemes"),
+  logPath: () => invoke<string | null>("log_path"),
   removeKubeconfig: (id: string) => invoke<AppState>("remove_kubeconfig", { id }),
 
   loadKubeconfig: (path: string | null) =>
