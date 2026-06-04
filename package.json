@@ -1,14 +1,17 @@
 {
   "name": "kube-front",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "A modern desktop frontend for K3S & Kubernetes clusters (Tauri + React).",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "set-version": "node scripts/set-version.mjs",
+    "check-version": "node scripts/set-version.mjs --check",
+    "bump": "node scripts/set-version.mjs --commit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

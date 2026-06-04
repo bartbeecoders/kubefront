@@ -1,6 +1,6 @@
 [package]
 name = "kube-front"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["KubeFront Contributors"]
 description = "A modern, pure-Rust desktop frontend for K3S and Kubernetes clusters"
@@ -24,7 +24,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 
 # Kubernetes
-kube = { version = "3.1", default-features = false, features = ["client", "rustls-tls", "runtime", "ring"] }
+# TLS backend: OpenSSL (not rustls). rustls/webpki accept only X.509 v3 certs and
+# reject the v1 client certs that some k3s / older clusters issue with
+# `UnsupportedCertVersion`; OpenSSL accepts them, matching kubectl's behaviour.
+kube = { version = "3.1", default-features = false, features = ["client", "openssl-tls", "runtime"] }
 k8s-openapi = { version = "0.27", features = ["latest"] }
 
 # Async runtime & channels
@@ -49,8 +52,11 @@ thiserror = "2.0"
 futures-util = { version = "0.3", features = ["std"] }
 directories = "5.0"
 
-# Direct rustls to reliably install the ring CryptoProvider (required for rustls 0.23+ when used via kube).
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Force a vendored (statically-linked) OpenSSL so release installers are
+# self-contained — no system libssl / OpenSSL DLL to ship. kube's `openssl-tls`
+# pulls openssl in transitively; declaring it here enables the `vendored` feature.
+# Build prereqs: a C compiler + Perl everywhere, plus NASM on Windows.
+openssl = { version = "0.10", features = ["vendored"] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

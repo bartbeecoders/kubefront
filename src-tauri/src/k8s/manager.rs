@@ -106,6 +106,20 @@ impl KubeConfigManager {
             .or_else(|| self.contexts.first().map(|c| c.name.as_str()))
     }
 
+    /// Namespace declared by the effective context in the kubeconfig itself
+    /// (`contexts[].context.namespace`), if any. Deploy kubeconfigs for
+    /// namespace-scoped users typically set this.
+    pub fn current_context_namespace(&self) -> Option<String> {
+        let name = self.effective_context()?;
+        self.kubeconfig
+            .as_ref()?
+            .contexts
+            .iter()
+            .find(|c| c.name == name)
+            .and_then(|c| c.context.as_ref())
+            .and_then(|c| c.namespace.clone())
+    }
+
     /// Build `KubeConfigOptions` for the currently selected context.
     /// This is what we pass to `Config::from_kubeconfig` when creating a real Client.
     pub fn current_kubeconfig_options(&self) -> Option<KubeConfigOptions> {

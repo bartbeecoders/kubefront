@@ -308,6 +308,15 @@ textarea {
   color: var(--text-faint);
   font-size: 0.9em;
 }
+.page-head .version-badge {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
 .toolbar {
   display: flex;
   align-items: center;

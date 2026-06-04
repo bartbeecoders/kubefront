@@ -91,6 +91,12 @@ pub struct KubeconfigEntry {
     /// Last context the user used in this specific kubeconfig.
     #[serde(default)]
     pub last_context: Option<String>,
+
+    /// Namespace to scope resource lists to while this kubeconfig is active.
+    /// None/empty falls back to the global `default_namespace`. Seeded from the
+    /// kubeconfig context's own `namespace` field on first successful connect.
+    #[serde(default)]
+    pub namespace: Option<String>,
 }
 
 impl KubeconfigEntry {
@@ -107,6 +113,7 @@ impl KubeconfigEntry {
             name,
             description: None,
             last_context: None,
+            namespace: None,
         }
     }
 }

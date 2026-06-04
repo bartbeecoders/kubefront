@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../api";
 import type { AppState, ColorSchemeInfo, ThemeMode } from "../types";
 
@@ -31,15 +32,20 @@ export function SettingsView(props: Props) {
   const { settings, schemes, onChange } = props;
 
   const [logPath, setLogPath] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     api.logPath().then(setLogPath).catch(() => {});
+    getVersion().then(setVersion).catch(() => {});
   }, []);
 
   const currentAccentHex = settings.custom_accent
     ? rgbToHex(settings.custom_accent)
     : schemes.find((s) => s.key === settings.color_scheme)?.hex ?? "#326ce5";
 
-  function updateEntry(id: string, patch: { name?: string; description?: string | null }) {
+  function updateEntry(
+    id: string,
+    patch: { name?: string; description?: string | null; namespace?: string | null },
+  ) {
     onChange({
       kubeconfigs: settings.kubeconfigs.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     });
@@ -49,6 +55,7 @@ export function SettingsView(props: Props) {
     <div className="settings">
       <div className="page-head">
         <h1>Settings</h1>
+        {version && <span className="version-badge">v{version}</span>}
       </div>
 
       {/* Kubeconfig path */}
@@ -80,13 +87,18 @@ export function SettingsView(props: Props) {
           value={settings.default_namespace}
           onChange={(e) => onChange({ default_namespace: e.target.value.trim() || "All" })}
         />
-        <div className="desc">Scopes resource lists. "All" lists every namespace.</div>
+        <div className="desc">
+          Fallback scope for resource lists. "All" lists every namespace. A per-connection
+          namespace (below) overrides this while that kubeconfig is active.
+        </div>
       </div>
 
       {/* Kubeconfig management */}
       <div className="section-title">Kubeconfig Management</div>
       <div className="desc" style={{ marginBottom: 10 }}>
-        Give each cluster a friendly name and optional description. Saved to settings.json.
+        Give each cluster a friendly name, optional description, and its own namespace scope
+        (empty = use the default namespace above; auto-filled from the kubeconfig's context on
+        first connect). Saved to settings.json.
       </div>
       <button className="btn" onClick={props.onAddKubeconfig}>
         ＋ Add kubeconfig file…
@@ -102,6 +114,7 @@ export function SettingsView(props: Props) {
                 <tr>
                   <th className="name">Name</th>
                   <th>Description</th>
+                  <th>Namespace</th>
                   <th>Path</th>
                   <th></th>
                 </tr>
@@ -127,6 +140,18 @@ export function SettingsView(props: Props) {
                           value={e.description ?? ""}
                           onChange={(ev) =>
                             updateEntry(e.id, { description: ev.target.value || null })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          style={{ width: 110 }}
+                          placeholder="default"
+                          title='Namespace scope while this kubeconfig is active. Empty = use the global default; "All" = every namespace.'
+                          value={e.namespace ?? ""}
+                          onChange={(ev) =>
+                            updateEntry(e.id, { namespace: ev.target.value.trim() || null })
                           }
                         />
                       </td>

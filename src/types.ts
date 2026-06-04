@@ -47,6 +47,8 @@ export interface KubeconfigEntry {
   name: string;
   description: string | null;
   last_context: string | null;
+  /** Per-connection namespace; null/empty falls back to the global default_namespace. */
+  namespace: string | null;
 }
 
 export type ThemeMode = "Dark" | "Light" | "Custom";

@@ -20,6 +20,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Check version consistency (package.json / tauri.conf.json / Cargo.*)
+        run: npm run check-version
       - name: Type-check + build frontend
         run: npm run build
 
@@ -42,6 +44,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      # Vendored OpenSSL (openssl-sys) needs NASM to assemble on Windows MSVC.
+      # Perl is already provided by the runner's Strawberry Perl.
+      - name: Install NASM (Windows, for vendored OpenSSL)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'

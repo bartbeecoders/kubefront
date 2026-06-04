@@ -99,6 +99,7 @@ export default function App() {
   const [pods, setPods] = useState<PodRow[]>([]);
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [tables, setTables] = useState<Record<string, TableData>>({});
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<Selection | null>(null);
   const [podFilter, setPodFilter] = useState("");
@@ -136,43 +137,69 @@ export default function App() {
     })().catch((e) => console.error("bootstrap failed", e));
   }, []);
 
+  // The namespace that scopes resource lists: the active connection's own
+  // namespace if set, otherwise the global default. Lets each kubeconfig keep
+  // its own scope (e.g. a deploy user that may only list one namespace).
+  const activeEntry = settings?.kubeconfigs.find(
+    (e) => e.id === settings.active_kubeconfig_id,
+  );
+  const effectiveNs =
+    activeEntry?.namespace?.trim() || settings?.default_namespace || "All";
+
   // ---- data refresh ----
+  // Fetch errors are collected and SHOWN, never swallowed — an RBAC 403 on a
+  // cluster-wide list (common for namespace-scoped users with namespace "All")
+  // must not render as a silently empty table.
   const refresh = useCallback(async () => {
     if (!settings) return;
-    const ns = settings.default_namespace;
-    try {
-      if (view === "pods" || view === "logging" || view === "monitoring") {
+    const ns = effectiveNs;
+    const errors: string[] = [];
+    if (view === "pods" || view === "logging" || view === "monitoring") {
+      try {
         setPods(await api.listPods(ns));
+      } catch (e) {
+        errors.push(String(e));
       }
-      if (view === "nodes" || view === "monitoring") {
-        setNodes(await api.listNodes());
-      }
-      const kinds = kindsForView(view);
-      if (kinds.length) {
-        const results = await Promise.all(
-          kinds.map((k) =>
-            api
-              .listResource(k, ns)
-              .then((d) => [k, d] as const)
-              .catch(() => [k, { headers: [], rows: [] } as TableData] as const),
-          ),
-        );
-        setTables((prev) => ({ ...prev, ...Object.fromEntries(results) }));
-      }
-    } catch {
-      /* not connected yet — ignore */
     }
-  }, [settings, view]);
+    if (view === "nodes" || view === "monitoring") {
+      try {
+        setNodes(await api.listNodes());
+      } catch (e) {
+        errors.push(String(e));
+      }
+    }
+    const kinds = kindsForView(view);
+    if (kinds.length) {
+      const results = await Promise.all(
+        kinds.map((k) =>
+          api
+            .listResource(k, ns)
+            .then((d) => [k, d] as const)
+            .catch((e) => {
+              errors.push(String(e));
+              return [k, { headers: [], rows: [] } as TableData] as const;
+            }),
+        ),
+      );
+      setTables((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+    }
+    const unique = [...new Set(errors)];
+    setDataError(
+      unique.length
+        ? unique[0] + (unique.length > 1 ? ` (+${unique.length - 1} more)` : "")
+        : null,
+    );
+  }, [settings, view, effectiveNs]);
 
   const refreshRef = useRef(refresh);
   useEffect(() => {
     refreshRef.current = refresh;
   }, [refresh]);
 
-  // Immediate refresh on view change or when a connection is established.
+  // Immediate refresh on view change, new connection, or namespace scope change.
   useEffect(() => {
     if (status.connected) refreshRef.current();
-  }, [view, status.connected]);
+  }, [view, status.connected, effectiveNs]);
 
   // Auto-refresh timer.
   useEffect(() => {
@@ -374,6 +401,16 @@ export default function App() {
           <div className="tip">
             If kubectl works in this terminal, the issue is likely network reachability or TLS from
             the app process. Run with RUST_LOG=debug for details.
+          </div>
+        </div>
+      )}
+
+      {!status.error && status.connected && dataError && (
+        <div className="error-banner">
+          ⚠ Failed to fetch resources: {dataError}
+          <div className="tip">
+            If this is a 403/Forbidden, your user is likely namespace-scoped — set the default
+            namespace in Settings to a namespace you have access to instead of "All".
           </div>
         </div>
       )}

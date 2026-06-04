@@ -228,10 +228,17 @@ pub async fn get_status(state: State<'_, SharedBackend>) -> Result<KubeStatus, S
 #[tauri::command]
 pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, String> {
     // Extract everything we need, then drop the lock before the (slow) network work.
-    let (opts, ctx_name, server) = {
+    let (kubeconfig, opts, ctx_name, server) = {
         let b = state.lock().await;
         let Some(opts) = b.manager.current_kubeconfig_options() else {
             return Ok(b.status(Some("No context selected in kubeconfig".into())));
+        };
+        // Use the kubeconfig we actually loaded from the user's chosen path — NOT the
+        // default (~/.kube/config). `Config::from_kubeconfig` ignores the loaded file
+        // and re-reads the default location, so a context that only exists in the
+        // selected file fails with "failed to load current context".
+        let Some(kubeconfig) = b.manager.kubeconfig.clone() else {
+            return Ok(b.status(Some("No kubeconfig loaded".into())));
         };
         let ctx_name = b
             .manager
@@ -243,50 +250,65 @@ pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, Stri
             .current_info()
             .map(|i| i.server.clone())
             .unwrap_or_default();
-        (opts, ctx_name, server)
+        (kubeconfig, opts, ctx_name, server)
     };
 
     tracing::info!("Connecting to context '{ctx_name}' → {server}");
 
-    // 15s timeout so we never hang on bad auth / exec plugins / unreachable servers.
+    // One 15s timeout around the WHOLE thing — including the network probe. Building
+    // the client (config parse + HTTP stack) is local and instant; the only network
+    // round-trip is `probe_cluster_version`, so it must live inside the timeout or we
+    // hang on unreachable servers / TLS failures. Its error is propagated (not
+    // swallowed) so the real reason reaches the log and the UI.
     let connect_fut = async {
-        let config = kube::Config::from_kubeconfig(&opts)
+        let config = kube::Config::from_custom_kubeconfig(kubeconfig, &opts)
             .await
-            .map_err(|e| e.to_string())?;
-        kube::Client::try_from(config).map_err(|e| e.to_string())
+            .map_err(|e| format!("kubeconfig error: {e}"))?;
+        let client =
+            kube::Client::try_from(config).map_err(|e| format!("client build error: {e}"))?;
+        let version = probe_cluster_version(&client).await?;
+        Ok::<_, String>((client, version))
     };
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut).await;
 
     match result {
-        Ok(Ok(client)) => {
-            let version = probe_cluster_version(&client).await;
+        Ok(Ok((client, version))) => {
             let mut b = state.lock().await;
             b.client = Some(client);
             b.connected = true;
-            b.cluster_version = version.or_else(|| Some("connected".into()));
+            tracing::info!("Connected to '{ctx_name}' ({server}); cluster version {version}");
+            b.cluster_version = Some(version);
 
             // Persist the successful connection into settings.
             let path = b.manager.path.as_ref().map(|p| p.display().to_string());
+            let ctx_ns = b.manager.current_context_namespace();
             b.settings.last_kubeconfig_path = path.clone();
             b.settings.last_context = b.manager.current_context.clone();
             if let (Some(path), Some(ctx)) = (&path, &b.manager.current_context) {
                 let (path, ctx) = (path.clone(), ctx.clone());
                 if let Some(entry) = b.settings.kubeconfigs.iter_mut().find(|k| k.path == path) {
                     entry.last_context = Some(ctx);
+                    // First connect on this entry: adopt the namespace the kubeconfig's
+                    // context declares, so namespace-scoped users work out of the box.
+                    if entry.namespace.is_none() {
+                        entry.namespace = ctx_ns.clone();
+                    }
                 }
             }
             b.settings.save_to_disk();
             Ok(b.status(None))
         }
         Ok(Err(e)) => {
+            tracing::error!("Connection to '{ctx_name}' ({server}) failed: {e}");
             let mut b = state.lock().await;
             b.connected = false;
             b.client = None;
             b.cluster_version = None;
-            Ok(b.status(Some(e)))
+            Ok(b.status(Some(format!("Failed to connect to {server}: {e}"))))
         }
         Err(_) => {
+            tracing::error!("Connection to '{ctx_name}' ({server}) timed out after 15s");
             let mut b = state.lock().await;
             b.connected = false;
             b.client = None;
@@ -353,7 +375,7 @@ pub async fn list_pods(
     let list = api
         .list(&ListParams::default())
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| log_err("list pods", e))?;
     Ok(list.items.iter().map(pod_row).collect())
 }
 
@@ -364,7 +386,7 @@ pub async fn list_nodes(state: State<'_, SharedBackend>) -> Result<Vec<NodeRow>,
     let list = api
         .list(&ListParams::default())
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| log_err("list nodes", e))?;
     Ok(list.items.iter().map(node_row).collect())
 }
 
@@ -589,6 +611,14 @@ async fn require_client(state: &State<'_, SharedBackend>) -> Result<kube::Client
         .ok_or_else(|| "Not connected to a cluster".to_string())
 }
 
+/// Stringify an API error AND write it to the log — list/get failures must never
+/// be silent (e.g. RBAC 403s on cluster-wide lists for namespace-scoped users).
+fn log_err(what: &str, e: impl std::fmt::Display) -> String {
+    let msg = e.to_string();
+    tracing::warn!("{what} failed: {msg}");
+    msg
+}
+
 /// "All" / empty → cluster-wide (None); otherwise a concrete namespace.
 fn normalize_scope(namespace: Option<String>) -> Option<String> {
     match namespace {
@@ -606,7 +636,7 @@ where
     api.list(&ListParams::default())
         .await
         .map(|l| l.items)
-        .map_err(|e| e.to_string())
+        .map_err(|e| log_err(&format!("list {}", short_kind::<K>()), e))
 }
 
 async fn list_namespaced<K>(client: &kube::Client, scope: &Option<String>) -> Result<Vec<K>, String>
@@ -624,7 +654,7 @@ where
     api.list(&ListParams::default())
         .await
         .map(|l| l.items)
-        .map_err(|e| e.to_string())
+        .map_err(|e| log_err(&format!("list {}", short_kind::<K>()), e))
 }
 
 async fn get_namespaced<K>(client: &kube::Client, namespace: &str, name: &str) -> Result<K, String>
@@ -636,7 +666,9 @@ where
     <K as kube::Resource>::DynamicType: Default,
 {
     let api: Api<K> = Api::namespaced(client.clone(), namespace);
-    api.get(name).await.map_err(|e| e.to_string())
+    api.get(name)
+        .await
+        .map_err(|e| log_err(&format!("get {}", short_kind::<K>()), e))
 }
 
 async fn get_cluster<K>(client: &kube::Client, name: &str) -> Result<K, String>
@@ -645,7 +677,17 @@ where
     <K as kube::Resource>::DynamicType: Default,
 {
     let api: Api<K> = Api::all(client.clone());
-    api.get(name).await.map_err(|e| e.to_string())
+    api.get(name)
+        .await
+        .map_err(|e| log_err(&format!("get {}", short_kind::<K>()), e))
+}
+
+/// Last path segment of a type name, e.g. "…::core::v1::Pod" → "Pod".
+fn short_kind<K>() -> &'static str {
+    std::any::type_name::<K>()
+        .rsplit("::")
+        .next()
+        .unwrap_or("?")
 }
 
 /// Project any fetched object into a [`ResourceDetail`] (metadata + JSON manifest).
@@ -685,15 +727,21 @@ where
     })
 }
 
-/// Best-effort cluster version probe (first node's kubelet version).
-async fn probe_cluster_version(client: &kube::Client) -> Option<String> {
-    let nodes: Api<Node> = Api::all(client.clone());
-    let list = nodes.list(&ListParams::default().limit(1)).await.ok()?;
-    list.items
-        .first()
-        .and_then(|n| n.status.as_ref())
-        .and_then(|s| s.node_info.as_ref())
-        .map(|i| i.kubelet_version.clone())
+/// Connectivity probe + version fetch. Hits the apiserver `/version` endpoint,
+/// which requires no RBAC (so it works for any authenticated user, unlike listing
+/// nodes) and forces a real network round-trip + TLS handshake. The error is
+/// returned — never swallowed — so a failed connection surfaces its true cause.
+async fn probe_cluster_version(client: &kube::Client) -> Result<String, String> {
+    let info = client
+        .apiserver_version()
+        .await
+        .map_err(|e| e.to_string())?;
+    // e.g. "v1.29.4+k3s1"; fall back to major.minor if git_version is blank.
+    Ok(if info.git_version.is_empty() {
+        format!("v{}.{}", info.major, info.minor)
+    } else {
+        info.git_version
+    })
 }
 
 // === Pod / Node projections (ported from the egui app) ===

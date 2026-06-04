@@ -13,10 +13,15 @@ name: Release
 #       gpg --import kubefront-linux-signing-pubkey.asc
 #       gpg --verify KubeFront_x.y.z_amd64.AppImage.asc KubeFront_x.y.z_amd64.AppImage
 #
-# How to cut a release:
-#   1. Bump the version in package.json + src-tauri/tauri.conf.json (+ Cargo.toml).
-#   2. git tag vX.Y.Z && git push origin vX.Y.Z
-# Or run it manually from the Actions tab (workflow_dispatch).
+# How to cut a release (the tag is the single source of truth for the version):
+#   1. git tag vX.Y.Z && git push --follow-tags
+#      The build derives X.Y.Z from the tag and stamps it into package.json,
+#      tauri.conf.json, and Cargo.toml automatically (scripts/set-version.mjs),
+#      so you never have to hand-edit version files.
+#   Optional local one-shot: `npm run bump 0.2.3` syncs all manifests + commits,
+#   then `git tag v0.2.3 && git push --follow-tags`.
+# Or run it manually from the Actions tab (workflow_dispatch) — there the version
+# falls back to whatever is in package.json.
 
 on:
   push:
@@ -51,6 +56,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Vendored OpenSSL (openssl-sys) needs NASM to assemble on Windows MSVC.
+      # Perl is already provided by the runner's Strawberry Perl.
+      - name: Install NASM (Windows, for vendored OpenSSL)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: Install Tauri system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -72,9 +86,24 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Compute release tag from version
+      # The pushed tag drives the version. On a tag build we take vX.Y.Z from the
+      # ref; on a manual (workflow_dispatch) run there is no tag, so we fall back
+      # to package.json. Either way we stamp the resolved version into all
+      # manifests so the built installers carry the right number.
+      - name: Resolve release version
         shell: bash
-        run: echo "RELEASE_TAG=v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Stamp version into manifests
+        shell: bash
+        run: node scripts/set-version.mjs "$VERSION"
 
       # --- Windows: generate a self-signed code-signing cert and tell Tauri to use it ---
       - name: Create self-signed code-signing certificate (Windows)

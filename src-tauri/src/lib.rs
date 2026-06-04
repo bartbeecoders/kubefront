@@ -1,8 +1,8 @@
 //! KubeFront — Tauri application entry point (library half).
 //!
-//! Owns app bootstrap: logging, the rustls crypto provider, initial kubeconfig
-//! discovery, managed backend state, and command registration. The actual UI is
-//! the React/Vite frontend rendered in the native WebView.
+//! Owns app bootstrap: logging, initial kubeconfig discovery, managed backend
+//! state, and command registration. The actual UI is the React/Vite frontend
+//! rendered in the native WebView. TLS is handled by OpenSSL (see Cargo.toml).
 
 mod commands;
 mod k8s;
@@ -139,13 +139,6 @@ pub fn run() {
     tracing::info!("Starting KubeFront (Tauri)");
     if let Some(p) = log_file_path() {
         tracing::info!("Writing logs to {}", p.display());
-    }
-
-    // rustls 0.23+ requires an explicit default CryptoProvider before the first
-    // TLS connection (kube + rustls-tls + ring). Install it once, up front.
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider())
-            .expect("Failed to install rustls ring CryptoProvider (ring feature missing?)");
     }
 
     let backend = build_initial_backend(settings);
