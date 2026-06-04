@@ -61,24 +61,21 @@ function writeJsonVersion(path, version) {
 function writeCargoVersion(version) {
   const text = readFileSync(CARGO, "utf8");
   // Only the version inside the [package] table — never a dependency's version.
-  const updated = text.replace(
-    /(\[package\][^[]*?\bversion\s*=\s*")[^"]*(")/,
-    `$1${version}$2`,
-  );
-  if (updated === text) die("could not find [package] version in Cargo.toml");
-  writeFileSync(CARGO, updated);
+  // NOTE: match-test explicitly; comparing replace output to the input would
+  // false-fail when the file already holds the target version (e.g. a CI
+  // checkout of a tag whose manifests were committed pre-stamped).
+  const re = /(\[package\][^[]*?\bversion\s*=\s*")[^"]*(")/;
+  if (!re.test(text)) die("could not find [package] version in Cargo.toml");
+  writeFileSync(CARGO, text.replace(re, `$1${version}$2`));
 }
 
 function writeCargoLockVersion(version) {
   // Keep the lockfile's own crate entry in sync so a bump doesn't leave Cargo.lock
   // dirty until the next build. Targets the `name = "kube-front"` block specifically.
   const text = readFileSync(CARGO_LOCK, "utf8");
-  const updated = text.replace(
-    new RegExp(`(name = "${CRATE}"\\r?\\nversion = ")[^"]*(")`),
-    `$1${version}$2`,
-  );
-  if (updated === text) die(`could not find ${CRATE} entry in Cargo.lock`);
-  writeFileSync(CARGO_LOCK, updated);
+  const re = new RegExp(`(name = "${CRATE}"\\r?\\nversion = ")[^"]*(")`);
+  if (!re.test(text)) die(`could not find ${CRATE} entry in Cargo.lock`);
+  writeFileSync(CARGO_LOCK, text.replace(re, `$1${version}$2`));
 }
 
 function git(args) {
