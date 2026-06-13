@@ -666,6 +666,7 @@ pub async fn add_remote_connection(
 /// Keeps the entry's id stable; `endpoint`/`ca_path`/`insecure` are ignored for
 /// Direct entries. Returns the updated settings.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // args map 1:1 to the IPC surface (api.ts)
 pub async fn update_connection(
     state: State<'_, SharedBackend>,
     id: String,

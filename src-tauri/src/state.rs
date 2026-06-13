@@ -413,6 +413,7 @@ impl AppState {
     /// only apply to Remote entries; for Direct entries the path is immutable
     /// (pick a different file via "Add kubeconfig" instead). Returns false if no
     /// entry with `id` exists.
+    #[allow(clippy::too_many_arguments)] // mirrors the update_connection IPC command
     pub fn update_connection(
         &mut self,
         id: &str,
