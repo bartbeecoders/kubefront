@@ -677,10 +677,15 @@ pub async fn update_connection(
     insecure: bool,
 ) -> Result<AppState, String> {
     let mut b = state.lock().await;
-    if !b
-        .settings
-        .update_connection(&id, name, description, namespace, endpoint, ca_path, insecure)
-    {
+    if !b.settings.update_connection(
+        &id,
+        name,
+        description,
+        namespace,
+        endpoint,
+        ca_path,
+        insecure,
+    ) {
         return Err(format!("Connection '{id}' not found"));
     }
     b.settings.save_to_disk();
