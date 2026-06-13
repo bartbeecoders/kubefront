@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { PodRow, Selection } from "../types";
 import { statusClass } from "../views";
+import { CopyButton } from "../components/CopyButton";
 
 interface Props {
   pods: PodRow[];
@@ -11,6 +12,8 @@ interface Props {
   selected: Selection | null;
   onSelect: (sel: Selection) => void;
   onOpenLogs: (pod: PodRow) => void;
+  onDelete: (kind: string, namespace: string | null, name: string) => void;
+  onRestart: (kind: string, namespace: string | null, name: string) => void;
 }
 
 export const podKey = (p: PodRow) => `${p.namespace}/${p.name}`;
@@ -40,6 +43,8 @@ export function PodsView({
   selected,
   onSelect,
   onOpenLogs,
+  onDelete,
+  onRestart,
 }: Props) {
   const namespaces = useMemo(() => {
     const set = new Set(pods.map((p) => p.namespace));
@@ -112,7 +117,12 @@ export function PodsView({
                   className={`clickable${isSel ? " selected" : ""}`}
                   onClick={() => onSelect(podSelection(p))}
                 >
-                  <td className="name">{p.name}</td>
+                  <td className="name">
+                    <span className="name-cell">
+                      {p.name}
+                      <CopyButton text={p.name} title="Copy pod name" />
+                    </span>
+                  </td>
                   <td>{p.namespace}</td>
                   <td>
                     <span className={`pill ${statusClass(p.phase)}`}>{p.phase}</span>
@@ -121,16 +131,38 @@ export function PodsView({
                   <td>{p.restarts}</td>
                   <td className="mono">{p.age}</td>
                   <td>{p.node}</td>
-                  <td>
-                    <button
-                      className="btn sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenLogs(p);
-                      }}
-                    >
-                      📜 Logs
-                    </button>
+                  <td className="actions">
+                    <span className="row-actions">
+                      <button
+                        className="btn sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenLogs(p);
+                        }}
+                      >
+                        📜 Logs
+                      </button>
+                      <button
+                        className="btn ghost sm"
+                        title="Restart pod (delete; its controller recreates it)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRestart("pods", p.namespace, p.name);
+                        }}
+                      >
+                        ↻
+                      </button>
+                      <button
+                        className="btn ghost sm danger-hover"
+                        title="Delete pod"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete("pods", p.namespace, p.name);
+                        }}
+                      >
+                        🗑
+                      </button>
+                    </span>
                   </td>
                 </tr>
               );

@@ -3,6 +3,7 @@
 // Nodes, Monitoring, Logging and Settings need bespoke components.
 
 export type ViewKey =
+  | "dashboard"
   | "clusters"
   | "nodes"
   | "namespaces"
@@ -18,6 +19,7 @@ export type ViewKey =
   | "storage"
   | "network"
   | "security"
+  | "crds"
   | "monitoring"
   | "logging"
   | "settings";
@@ -37,6 +39,7 @@ export const NAV: NavSection[] = [
   {
     heading: "Cluster",
     items: [
+      { key: "dashboard", label: "Dashboard", icon: "🏠" },
       { key: "clusters", label: "Clusters", icon: "🖧" },
       { key: "nodes", label: "Nodes", icon: "🖥" },
       { key: "namespaces", label: "Namespaces", icon: "🗂" },
@@ -71,6 +74,10 @@ export const NAV: NavSection[] = [
   {
     heading: "Access",
     items: [{ key: "security", label: "Security", icon: "🛡" }],
+  },
+  {
+    heading: "Custom Resources",
+    items: [{ key: "crds", label: "CRDs", icon: "🧩" }],
   },
   {
     heading: "Observability",
@@ -158,7 +165,64 @@ export const TABLE_VIEWS: Partial<Record<ViewKey, TableView>> = {
       { title: "Role Bindings", kind: "rolebindings", empty: "No role bindings in scope." },
     ],
   },
+  crds: {
+    title: "Custom Resource Definitions",
+    sections: [{ title: "CRDs", kind: "crds", empty: "No custom resource definitions found." }],
+  },
 };
+
+/** Workload kinds that support a rolling restart (rollout-restart annotation). */
+export const RESTARTABLE_KINDS = new Set(["deployments", "statefulsets", "daemonsets"]);
+
+/** Kinds the UI can edit in place (currently only ConfigMap `data`). */
+export const EDITABLE_KINDS = new Set(["configmaps"]);
+
+/** Kinds the UI allows deleting (namespaces/nodes deliberately excluded). */
+export const DELETABLE_KINDS = new Set([
+  "pods",
+  "services",
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+  "jobs",
+  "cronjobs",
+  "configmaps",
+  "secrets",
+  "pvcs",
+  "pvs",
+  "storageclasses",
+  "ingresses",
+  "networkpolicies",
+  "serviceaccounts",
+  "roles",
+  "rolebindings",
+  "crds",
+]);
+
+/** Singular display name for a resource kind, e.g. "deployments" → "deployment". */
+export function kindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    pods: "pod",
+    services: "service",
+    deployments: "deployment",
+    statefulsets: "statefulset",
+    daemonsets: "daemonset",
+    jobs: "job",
+    cronjobs: "cronjob",
+    configmaps: "configmap",
+    secrets: "secret",
+    pvcs: "persistent volume claim",
+    pvs: "persistent volume",
+    storageclasses: "storage class",
+    ingresses: "ingress",
+    networkpolicies: "network policy",
+    serviceaccounts: "service account",
+    roles: "role",
+    rolebindings: "role binding",
+    crds: "custom resource definition",
+  };
+  return labels[kind] ?? kind;
+}
 
 /** Status string → pill CSS class. */
 export function statusClass(s: string): string {

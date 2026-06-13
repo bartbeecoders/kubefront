@@ -19,19 +19,30 @@ Lightweight, cross-platform (Linux + Windows + macOS), uses your existing `kubec
 
 ## Architecture
 
+KubeFront is a Cargo **workspace** of three crates:
+
 ```
-┌─ Native window (Tauri WebView) ──────────────┐
-│  React + TypeScript + Vite  (src/)           │
-│            ↕  Tauri IPC commands / Channels  │
-│  Rust backend (src-tauri/)                   │
-│    • commands.rs  — IPC bridge               │
-│    • k8s/         — kube-rs client + lists   │
-│    • state.rs     — persisted settings       │
-└──────────────────────────────────────────────┘
+crates/kube-core/         shared Kubernetes logic + serde DTOs (LocalKube, projections, log_stream)
+crates/kubefront-backend/ headless axum REST server (multi-cluster, sits behind a reverse proxy)
+src-tauri/                the desktop app (React WebView + Rust), depends on kube-core
 ```
 
-- **Frontend** (`src/`) renders the UI and pulls resource lists on a timer via typed `invoke()` calls.
-- **Backend** (`src-tauri/`) owns every `kube::Client` / `Kubeconfig` and runs all Kubernetes work on Tauri's Tokio runtime. Pod logs are streamed to the UI over a Tauri `Channel`.
+The desktop app reaches each cluster one of two ways:
+
+```
+Direct (port 6443):  desktop ──kube::Client (OpenSSL)──▶ cluster API server
+Remote (port 443):   desktop ──HTTPS──▶ reverse proxy ──▶ kubefront-backend ──kube::Client──▶ cluster
+```
+
+- **`kube-core`** owns every `kube::Client` / `Kubeconfig`, the resource projections, and the
+  `log_stream`. It is shared verbatim by the desktop (Direct mode) and the backend server, so the
+  Kubernetes logic lives in exactly one place.
+- **`src-tauri`** (desktop) renders the UI and pulls resource lists on a timer via typed
+  `invoke()` calls. Each command dispatches to either a local client (Direct) or an HTTP
+  `RemoteKube` (Remote) — the React layer is identical in both modes. Pod logs stream to the UI
+  over a Tauri `Channel`.
+- **`kubefront-backend`** holds the real clients for clusters reachable only through a reverse
+  proxy (e.g. globally-dispersed OT sites). See *Connecting through a reverse proxy* below.
 - No bundled Chromium — Tauri uses the OS WebView (WebKitGTK on Linux, WebView2 on Windows, WKWebView on macOS).
 
 See [AGENTS.md](./AGENTS.md) for architecture rules and invariants.
@@ -64,8 +75,66 @@ it into your home or fix permissions).
 ### Build a release bundle
 
 ```bash
-npm run tauri build      # produces installers in src-tauri/target/release/bundle/
+npm run tauri build      # produces installers in target/release/bundle/
 ```
+
+## Connecting through a reverse proxy (kubefront-backend)
+
+Some clusters can only be reached through a reverse proxy on **port 443** — for example
+Kubernetes/K3S clusters in segregated OT networks. For these, run the **`kubefront-backend`**
+server *next to the cluster* (where it can reach the API server on 6443) and point the desktop
+app at it. The desktop and the backend share the same Kubernetes logic (`kube-core`), so a remote
+connection behaves identically to a direct one.
+
+### Run the backend
+
+```bash
+cargo build --release -p kubefront-backend
+cp crates/kubefront-backend/backend.toml.example backend.toml   # then edit it
+./target/release/kubefront-backend --config backend.toml
+```
+
+`backend.toml` lists the clusters this instance exposes:
+
+```toml
+listen = "127.0.0.1:8080"   # bind loopback; let only the reverse proxy reach it
+base_path = "/"             # "/" = the proxy strips its own site segment
+
+[[connection]]
+id = "connection1"          # URL segment: /connection1/api/...
+name = "K3S Server 1"
+kubeconfig = "/etc/kubefront/k3s-server1.yaml"
+context = "default"
+namespace = ""              # optional scope; "" = all namespaces
+read_only = false           # true ⇒ delete / restart / edit return 403
+```
+
+> **Security — trust boundary.** The backend performs **no authentication of its own**: it trusts
+> the reverse proxy to terminate TLS and authenticate. Bind it to loopback (or an internal
+> interface only the proxy reaches) and **never expose it directly** — a non-loopback bind logs a
+> loud warning. Use `read_only = true` for connections that should be view-only.
+
+### Reverse proxy
+
+The proxy maps a per-site path segment to the backend and forwards the rest. With nginx:
+
+```nginx
+location /k3s-server1/ {
+    proxy_pass http://127.0.0.1:8080/;   # strips /k3s-server1, forwards /connection1/api/...
+    proxy_buffering off;                 # required for live log streaming (SSE)
+}
+```
+
+A URL like `https://server/k3s-server1/connection1/api` has **two identifiers**: `k3s-server1`
+selects the **site/backend** (proxy routing), and `connection1` selects the **connection** within
+that backend (the `[[connection]] id`).
+
+### Add it in the desktop app
+
+**Settings → Remote Connections** → enter a name and the endpoint
+(`https://server/k3s-server1/connection1`), optionally a CA bundle for an internal/self-signed
+proxy certificate, then **Test** and **Add remote**. The connection then appears on the Dashboard
+and in the connection list; views, logs, and edits all work exactly like a direct connection.
 
 ## Installing a release
 
@@ -116,13 +185,18 @@ Then install the `.deb` (`sudo apt install ./KubeFront_*.deb`), make the
 
 ```bash
 npm run build                                   # type-check + build the frontend
-cargo fmt   --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --all -- --check                      # whole workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p kube-core                         # DTO round-trips + error-string golden tests
 RUST_LOG=debug,kube=info npm run tauri dev      # verbose backend logs
 ```
 
-> The Rust crate embeds the built frontend (`dist/`) via `generate_context!`. Run `npm run build`
-> once before `cargo clippy`/`cargo build` so `dist/` exists.
+> The desktop crate embeds the built frontend (`dist/`) via `generate_context!`. Run `npm run build`
+> once before `cargo clippy`/`cargo build` so `dist/` exists. (Building `kube-core` or
+> `kubefront-backend` alone does not need `dist/`.)
+>
+> Windows builds need **NASM** + **Perl** for the vendored OpenSSL that both the desktop and the
+> backend link.
 
 ### Logs & troubleshooting
 

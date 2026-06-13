@@ -1,5 +1,6 @@
 import type { Selection, TableData } from "../types";
-import { statusClass } from "../views";
+import { DELETABLE_KINDS, RESTARTABLE_KINDS, statusClass } from "../views";
+import { CopyButton } from "./CopyButton";
 
 const MONO_COLS = new Set(["Age", "Cluster IP", "Capacity", "Last Schedule"]);
 
@@ -9,14 +10,19 @@ interface Props {
   empty: string;
   selected: Selection | null;
   onSelect: (sel: Selection) => void;
+  onDelete?: (kind: string, namespace: string | null, name: string) => void;
+  onRestart?: (kind: string, namespace: string | null, name: string) => void;
 }
 
 /** Renders a generic headers + rows projection; rows are selectable. */
-export function ResourceTable({ kind, data, empty, selected, onSelect }: Props) {
+export function ResourceTable({ kind, data, empty, selected, onSelect, onDelete, onRestart }: Props) {
   if (!data.rows.length) {
     return <div className="empty">{empty}</div>;
   }
   const nsIdx = data.headers.indexOf("Namespace");
+  const canDelete = !!onDelete && DELETABLE_KINDS.has(kind);
+  const canRestart = !!onRestart && RESTARTABLE_KINDS.has(kind);
+  const hasActions = canDelete || canRestart;
 
   return (
     <div className="table-wrap">
@@ -28,6 +34,7 @@ export function ResourceTable({ kind, data, empty, selected, onSelect }: Props) 
                 {h}
               </th>
             ))}
+            {hasActions && <th className="actions" />}
           </tr>
         </thead>
         <tbody>
@@ -57,6 +64,36 @@ export function ResourceTable({ kind, data, empty, selected, onSelect }: Props) 
                 {row.map((cell, ci) => (
                   <Cell key={ci} header={data.headers[ci]} value={cell} first={ci === 0} />
                 ))}
+                {hasActions && (
+                  <td className="actions">
+                    <span className="row-actions">
+                      {canRestart && (
+                        <button
+                          className="btn ghost sm"
+                          title="Rolling restart"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRestart!(kind, namespace, name);
+                          }}
+                        >
+                          ↻
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          className="btn ghost sm danger-hover"
+                          title="Delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete!(kind, namespace, name);
+                          }}
+                        >
+                          🗑
+                        </button>
+                      )}
+                    </span>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -71,7 +108,15 @@ function Cell({ header, value, first }: { header: string; value: string; first: 
     const cls = statusClass(value);
     return <td>{cls ? <span className={`pill ${cls}`}>{value}</span> : value}</td>;
   }
-  if (first) return <td className="name">{value}</td>;
+  if (first)
+    return (
+      <td className="name">
+        <span className="name-cell">
+          {value}
+          <CopyButton text={value} title="Copy name" />
+        </span>
+      </td>
+    );
   if (MONO_COLS.has(header)) return <td className="mono">{value}</td>;
   return <td>{value}</td>;
 }

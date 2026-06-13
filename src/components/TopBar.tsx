@@ -15,6 +15,9 @@ interface Props {
 export function TopBar(props: Props) {
   const { status, connecting } = props;
   const current = status.contexts.find((c) => c.name === status.current_context);
+  // A connected connection whose "kubeconfig path" is a URL is a remote backend.
+  const isRemote =
+    !!status.kubeconfig_path && /^https?:\/\//.test(status.kubeconfig_path);
 
   return (
     <header className="topbar">
@@ -37,21 +40,33 @@ export function TopBar(props: Props) {
 
       <div className="sep" />
 
-      <span className="ctx-label">Context</span>
-      <select
-        className="select"
-        value={status.current_context ?? ""}
-        onChange={(e) => props.onSelectContext(e.target.value)}
-      >
-        {!status.current_context && <option value="">Select context…</option>}
-        {status.contexts.map((c) => (
-          <option key={c.name} value={c.name}>
-            {c.name}
-            {c.is_k3s ? "  🟣 K3S" : ""} ({c.cluster})
-          </option>
-        ))}
-      </select>
-      {current?.is_k3s && <span className="k3s-badge">K3S</span>}
+      {isRemote ? (
+        <>
+          <span className="ctx-label">Remote</span>
+          <span className="mono" title={status.kubeconfig_path ?? ""}>
+            {status.current_context ?? "backend"}
+          </span>
+          <span className="pill pill-remote">Remote</span>
+        </>
+      ) : (
+        <>
+          <span className="ctx-label">Context</span>
+          <select
+            className="select"
+            value={status.current_context ?? ""}
+            onChange={(e) => props.onSelectContext(e.target.value)}
+          >
+            {!status.current_context && <option value="">Select context…</option>}
+            {status.contexts.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+                {c.is_k3s ? "  🟣 K3S" : ""} ({c.cluster})
+              </option>
+            ))}
+          </select>
+          {current?.is_k3s && <span className="k3s-badge">K3S</span>}
+        </>
+      )}
 
       <div className="sep" />
 

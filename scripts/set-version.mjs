@@ -22,7 +22,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PKG = join(ROOT, "package.json");
 const CONF = join(ROOT, "src-tauri", "tauri.conf.json");
 const CARGO = join(ROOT, "src-tauri", "Cargo.toml");
-const CARGO_LOCK = join(ROOT, "src-tauri", "Cargo.lock");
+// Workspace lockfile lives at the repo root (the workspace produces ONE Cargo.lock).
+const CARGO_LOCK = join(ROOT, "Cargo.lock");
 const CRATE = "kube-front"; // [package] name, used to target the right Cargo.lock entry
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -120,7 +121,7 @@ writeCargoLockVersion(version);
 console.log(`set-version: set ${version} in package.json, tauri.conf.json, Cargo.toml, Cargo.lock`);
 
 if (flags.has("--commit")) {
-  git(["add", "package.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]);
+  git(["add", "package.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "Cargo.lock"]);
   git(["commit", "-m", `chore: release v${version}`]);
   console.log(`set-version: committed "chore: release v${version}"`);
 }

@@ -24,3 +24,5 @@ Vibecoding/kubeconfig
 *.kubeconfig
 scripts/certs/*
 !scripts/certs/.gitkeep
+
+testrun/

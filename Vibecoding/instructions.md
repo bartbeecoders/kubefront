@@ -42,3 +42,22 @@ Can you add the other pages that are needed for the frontend?
 Refactor this app to use a more modern ui (web based ?). Replace egui with a web-based ui.
 
 Add a detail info pane for each resource type that shows the details of the selected resource.
+
+
+Can you add following features:
+
+- add a main dashboard page that shows all the configured clusters (with status, version, nodes, pods, etc.)
+    - user can clis on a cluster card, which will bring him to the details page
+- add ability to delete pods, restart pods
+- add ability to delete deployments, restart deployments
+- add ability to delete services
+- add ability to delete configmaps
+- add ability to delete secrets
+- add ability to delete storage
+- add ability to delete network
+- add ability to delete security
+
+In key places add a copy text feature to copy the text to the clipboard.
+
+
+Add the ability to see CRDS

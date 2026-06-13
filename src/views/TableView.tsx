@@ -7,10 +7,12 @@ interface Props {
   tables: Record<string, TableData>;
   selected: Selection | null;
   onSelect: (sel: Selection) => void;
+  onDelete: (kind: string, namespace: string | null, name: string) => void;
+  onRestart: (kind: string, namespace: string | null, name: string) => void;
 }
 
 /** Renders one or more selectable resource tables for a declarative table view. */
-export function TableView({ def, tables, selected, onSelect }: Props) {
+export function TableView({ def, tables, selected, onSelect, onDelete, onRestart }: Props) {
   return (
     <div>
       {def.sections.map((s) => {
@@ -27,6 +29,8 @@ export function TableView({ def, tables, selected, onSelect }: Props) {
               empty={s.empty}
               selected={selected}
               onSelect={onSelect}
+              onDelete={onDelete}
+              onRestart={onRestart}
             />
           </section>
         );

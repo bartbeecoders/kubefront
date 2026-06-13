@@ -1,0 +1,27 @@
+# Package is `kubefront-core` (not `kube-core`) to avoid clashing with the
+# upstream `kube-core` crate that `kube` depends on. Lib is `kubefront_core`.
+[package]
+name = "kubefront-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared Kubernetes logic + serde DTOs for KubeFront (desktop app and backend server)."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "kubefront_core"
+
+[dependencies]
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
+tokio = { workspace = true }
+futures-util = { workspace = true }
+async-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+home = { workspace = true }
+# Pulls in the vendored OpenSSL that kube's openssl-tls links against.
+openssl = { workspace = true }

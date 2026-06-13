@@ -1,37 +1,42 @@
 //! Tauri command surface — the bridge between the React frontend and the
-//! Kubernetes backend (kube-rs). Every command is async and runs on Tauri's
-//! Tokio runtime, so we can call kube-rs directly.
+//! Kubernetes backend. The heavy lifting now lives in the shared `kubefront_core`
+//! crate ([`LocalKube`] + projections); this module orchestrates: it holds the
+//! managed [`Backend`] state, builds connections, and adapts core results into
+//! the `Result<T, String>` shape the frontend expects.
 //!
 //! Design notes:
 //! - All shared state lives in [`Backend`], guarded by a Tokio `Mutex` and
 //!   registered as Tauri managed state.
-//! - Resource lists are *pulled* on demand by the frontend (polling), instead
-//!   of the old egui push-channel model. Each list command returns a small
-//!   serializable projection, never raw k8s objects.
-//! - Live pod logs are *pushed* through a Tauri [`Channel`], which is the
-//!   idiomatic v2 way to stream many events to a single caller.
+//! - Resource lists are *pulled* on demand by the frontend (polling). Each list
+//!   command returns a small serializable projection, never raw k8s objects.
+//! - Live pod logs are *pushed* through a Tauri [`Channel`], fed by the core's
+//!   transport-agnostic `log_stream`.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
-use k8s_openapi::api::core::v1::{Node, Pod};
-use kube::api::{Api, ListParams};
-use kube::core::NamespaceResourceScope;
+use futures_util::StreamExt;
+use kube::config::{KubeConfigOptions, Kubeconfig};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::k8s::manager::{ContextInfo, KubeConfigManager};
-use crate::k8s::store::{self, human_age, TableData};
-use crate::state::{AppState, ColorScheme};
+use kubefront_core::{
+    normalize_scope, summarize, ClusterSummary, ContextInfo, KubeConfigManager, KubeStatus,
+    LocalKube, LogEvent, NodeRow, PodRow, ResourceDetail, TableData,
+};
+
+use crate::conn::Active;
+use crate::remote::RemoteKube;
+use crate::state::{AppState, ColorScheme, ConnMode};
 
 /// All mutable application state shared across commands.
 #[derive(Default)]
 pub struct Backend {
     pub manager: KubeConfigManager,
-    pub client: Option<kube::Client>,
-    pub connected: bool,
-    pub cluster_version: Option<String>,
+    /// The active connection — Local (direct kube client) or Remote (HTTP backend).
+    pub active: Option<Active>,
     pub settings: AppState,
     /// Active log streams → cancellation sender. Dropping/sending stops the stream.
     pub log_streams: HashMap<u64, oneshot::Sender<()>>,
@@ -40,79 +45,46 @@ pub struct Backend {
 
 pub type SharedBackend = Mutex<Backend>;
 
-// ============================================================================
-// Serializable DTOs returned to the frontend
-// ============================================================================
-
-/// Snapshot of connection + kubeconfig state, returned by most config commands.
-#[derive(Serialize, Default)]
-pub struct KubeStatus {
-    pub connected: bool,
-    pub cluster_version: Option<String>,
-    pub current_context: Option<String>,
-    pub kubeconfig_path: Option<String>,
-    pub context_count: usize,
-    pub contexts: Vec<ContextInfo>,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct PodRow {
-    pub name: String,
-    pub namespace: String,
-    pub phase: String,
-    pub ready: String,
-    pub restarts: u32,
-    pub age: String,
-    pub node: String,
-    pub containers: Vec<String>,
-}
-
-#[derive(Serialize)]
-pub struct NodeRow {
-    pub name: String,
-    pub status: String,
-    pub roles: String,
-    pub version: String,
-    pub age: String,
-}
-
-/// Full detail for a single selected resource of any kind.
-#[derive(Serialize)]
-pub struct ResourceDetail {
-    pub kind: String,
-    pub name: String,
-    pub namespace: Option<String>,
-    pub age: String,
-    pub labels: Vec<(String, String)>,
-    pub annotations: Vec<(String, String)>,
-    /// The full object as pretty-printed JSON (managedFields stripped).
-    pub manifest: String,
-}
-
-/// One streamed log event. `kind` is "header" | "line" | "error" | "ended".
-#[derive(Serialize, Clone)]
-pub struct LogEvent {
-    pub kind: String,
-    pub line: String,
-}
-
 impl Backend {
     fn status(&self, error: Option<String>) -> KubeStatus {
-        KubeStatus {
-            connected: self.connected,
-            cluster_version: self.cluster_version.clone(),
-            current_context: self.manager.current_context.clone(),
-            kubeconfig_path: self.manager.path.as_ref().map(|p| p.display().to_string()),
-            context_count: self.manager.contexts.len(),
-            contexts: self.manager.contexts.clone(),
-            error,
+        match &self.active {
+            // Remote: the manager (local kubeconfig contexts) is irrelevant; report
+            // the endpoint + the friendly name and an empty context list. The
+            // frontend treats `connected && contexts == []` as a remote connection.
+            Some(active @ Active::Remote(_)) => KubeStatus {
+                connected: true,
+                cluster_version: Some(active.cluster_version()),
+                current_context: self.active_name(),
+                kubeconfig_path: active.endpoint().map(|s| s.to_string()),
+                context_count: 0,
+                contexts: vec![],
+                error,
+            },
+            other => KubeStatus {
+                connected: other.is_some(),
+                cluster_version: other.as_ref().map(|a| a.cluster_version()),
+                current_context: self.manager.current_context.clone(),
+                kubeconfig_path: self.manager.path.as_ref().map(|p| p.display().to_string()),
+                context_count: self.manager.contexts.len(),
+                contexts: self.manager.contexts.clone(),
+                error,
+            },
         }
+    }
+
+    /// Friendly name of the active connection entry (shown for remote connections).
+    fn active_name(&self) -> Option<String> {
+        self.settings.active_kubeconfig().map(|e| e.name.clone())
+    }
+
+    /// Clear the active connection (e.g. after changing context/kubeconfig).
+    fn disconnect(&mut self) {
+        self.active = None;
     }
 }
 
 // ============================================================================
-// Settings
+// Settings  (LOCAL-only — never touch the cluster/backend)
 // ============================================================================
 
 #[tauri::command]
@@ -132,7 +104,6 @@ pub async fn save_settings(
 }
 
 /// The resolved accent color (hex, e.g. `#326ce5`) for the current settings.
-/// Single source of truth for theming — the frontend sets this as a CSS var.
 #[tauri::command]
 pub async fn resolved_accent(state: State<'_, SharedBackend>) -> Result<String, String> {
     Ok(state.lock().await.settings.resolved_accent_hex())
@@ -177,7 +148,7 @@ pub async fn remove_kubeconfig(
 }
 
 // ============================================================================
-// Kubeconfig & connection
+// Kubeconfig & connection  (DIRECT-only)
 // ============================================================================
 
 /// Load a kubeconfig (None = default discovery) into the manager. Does not connect.
@@ -193,9 +164,7 @@ pub async fn load_kubeconfig(
     };
     match res {
         Ok(_) => {
-            b.connected = false;
-            b.client = None;
-            b.cluster_version = None;
+            b.disconnect();
             Ok(b.status(None))
         }
         Err(e) => Ok(b.status(Some(e.to_string()))),
@@ -211,9 +180,7 @@ pub async fn set_context(
     let mut b = state.lock().await;
     if b.manager.contexts.iter().any(|c| c.name == name) {
         b.manager.current_context = Some(name);
-        b.connected = false;
-        b.client = None;
-        b.cluster_version = None;
+        b.disconnect();
     }
     Ok(b.status(None))
 }
@@ -224,9 +191,23 @@ pub async fn get_status(state: State<'_, SharedBackend>) -> Result<KubeStatus, S
     Ok(state.lock().await.status(None))
 }
 
-/// Create a live `kube::Client` for the current context and probe its version.
+/// (Re)connect the active connection — dispatches by the active entry's mode.
 #[tauri::command]
 pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, String> {
+    let mode = {
+        let b = state.lock().await;
+        b.settings
+            .active_kubeconfig()
+            .map(|e| (e.mode, e.id.clone()))
+    };
+    match mode {
+        Some((ConnMode::Remote, id)) => connect_remote(state, id).await,
+        _ => connect_direct(state).await,
+    }
+}
+
+/// Create a live `kube::Client` for the current context and probe its version.
+async fn connect_direct(state: State<'_, SharedBackend>) -> Result<KubeStatus, String> {
     // Extract everything we need, then drop the lock before the (slow) network work.
     let (kubeconfig, opts, ctx_name, server) = {
         let b = state.lock().await;
@@ -234,9 +215,8 @@ pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, Stri
             return Ok(b.status(Some("No context selected in kubeconfig".into())));
         };
         // Use the kubeconfig we actually loaded from the user's chosen path — NOT the
-        // default (~/.kube/config). `Config::from_kubeconfig` ignores the loaded file
-        // and re-reads the default location, so a context that only exists in the
-        // selected file fails with "failed to load current context".
+        // default (~/.kube/config), so a context that only exists in the selected
+        // file still connects.
         let Some(kubeconfig) = b.manager.kubeconfig.clone() else {
             return Ok(b.status(Some("No kubeconfig loaded".into())));
         };
@@ -255,30 +235,15 @@ pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, Stri
 
     tracing::info!("Connecting to context '{ctx_name}' → {server}");
 
-    // One 15s timeout around the WHOLE thing — including the network probe. Building
-    // the client (config parse + HTTP stack) is local and instant; the only network
-    // round-trip is `probe_cluster_version`, so it must live inside the timeout or we
-    // hang on unreachable servers / TLS failures. Its error is propagated (not
-    // swallowed) so the real reason reaches the log and the UI.
-    let connect_fut = async {
-        let config = kube::Config::from_custom_kubeconfig(kubeconfig, &opts)
-            .await
-            .map_err(|e| format!("kubeconfig error: {e}"))?;
-        let client =
-            kube::Client::try_from(config).map_err(|e| format!("client build error: {e}"))?;
-        let version = probe_cluster_version(&client).await?;
-        Ok::<_, String>((client, version))
-    };
-
-    let result = tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut).await;
-
-    match result {
-        Ok(Ok((client, version))) => {
+    // One 15s timeout around the WHOLE thing — including the network probe (see
+    // LocalKube::connect_from). Timeout vs. error is distinguished so the UI can
+    // give the right hint.
+    match LocalKube::connect_from(kubeconfig, opts, Duration::from_secs(15)).await {
+        Ok(local) => {
+            let version = local.cluster_version().to_string();
             let mut b = state.lock().await;
-            b.client = Some(client);
-            b.connected = true;
+            b.active = Some(Active::Local(local));
             tracing::info!("Connected to '{ctx_name}' ({server}); cluster version {version}");
-            b.cluster_version = Some(version);
 
             // Persist the successful connection into settings.
             let path = b.manager.path.as_ref().map(|p| p.display().to_string());
@@ -299,29 +264,93 @@ pub async fn connect(state: State<'_, SharedBackend>) -> Result<KubeStatus, Stri
             b.settings.save_to_disk();
             Ok(b.status(None))
         }
-        Ok(Err(e)) => {
-            tracing::error!("Connection to '{ctx_name}' ({server}) failed: {e}");
-            let mut b = state.lock().await;
-            b.connected = false;
-            b.client = None;
-            b.cluster_version = None;
-            Ok(b.status(Some(format!("Failed to connect to {server}: {e}"))))
-        }
-        Err(_) => {
+        Err(kubefront_core::CoreError::Timeout(_)) => {
             tracing::error!("Connection to '{ctx_name}' ({server}) timed out after 15s");
             let mut b = state.lock().await;
-            b.connected = false;
-            b.client = None;
-            b.cluster_version = None;
+            b.disconnect();
             Ok(b.status(Some(format!(
                 "Connection to {server} timed out after 15s. Common causes: server unreachable from this machine, firewall, wrong network/VPN, or TLS verification failure. Try the same `kubectl` command from this exact terminal."
             ))))
         }
+        Err(e) => {
+            tracing::error!("Connection to '{ctx_name}' ({server}) failed: {e}");
+            let mut b = state.lock().await;
+            b.disconnect();
+            Ok(b.status(Some(format!("Failed to connect to {server}: {e}"))))
+        }
+    }
+}
+
+/// Build a RemoteKube for the entry `id`, probe `GET /status`, make it active.
+async fn connect_remote(state: State<'_, SharedBackend>, id: String) -> Result<KubeStatus, String> {
+    let (endpoint, ca_path, insecure) = {
+        let b = state.lock().await;
+        let Some(entry) = b.settings.kubeconfigs.iter().find(|k| k.id == id) else {
+            return Ok(b.status(Some(format!("Connection '{id}' not found"))));
+        };
+        let Some(endpoint) = entry.endpoint.clone() else {
+            return Ok(b.status(Some("Remote connection has no endpoint".into())));
+        };
+        (endpoint, entry.ca_path.clone(), entry.insecure)
+    };
+
+    let ca_pem = match read_ca(&ca_path) {
+        Ok(v) => v,
+        Err(e) => {
+            let mut b = state.lock().await;
+            b.disconnect();
+            return Ok(b.status(Some(e)));
+        }
+    };
+
+    let mut remote = match RemoteKube::new(endpoint.clone(), ca_pem, insecure) {
+        Ok(r) => r,
+        Err(e) => {
+            let mut b = state.lock().await;
+            b.disconnect();
+            return Ok(b.status(Some(e)));
+        }
+    };
+
+    match remote.refresh_status().await {
+        Ok(st) => {
+            let mut b = state.lock().await;
+            b.settings.set_active_kubeconfig(&id);
+            // Seed the connection's namespace from the backend's configured scope, so
+            // `effectiveNs` works for namespace-restricted backends (no cluster-wide 403).
+            if let Some(entry) = b.settings.kubeconfigs.iter_mut().find(|k| k.id == id) {
+                if entry.namespace.is_none() {
+                    entry.namespace = st.namespace.clone();
+                }
+            }
+            b.active = Some(Active::Remote(remote));
+            b.settings.save_to_disk();
+            tracing::info!(
+                "Connected to remote '{endpoint}'; cluster version {}",
+                st.cluster_version
+            );
+            Ok(b.status(None))
+        }
+        Err(e) => {
+            tracing::error!("Remote connect to '{endpoint}' failed: {e}");
+            let mut b = state.lock().await;
+            b.disconnect();
+            Ok(b.status(Some(format!("Failed to connect to {endpoint}: {e}"))))
+        }
+    }
+}
+
+/// Read an optional CA PEM bundle from disk for a remote connection.
+fn read_ca(ca_path: &Option<String>) -> Result<Option<Vec<u8>>, String> {
+    match ca_path {
+        Some(p) if !p.trim().is_empty() => std::fs::read(p)
+            .map(Some)
+            .map_err(|e| format!("failed to read CA file {p}: {e}")),
+        _ => Ok(None),
     }
 }
 
 /// Register (if needed), load, select last context for, and connect to a kubeconfig file.
-/// This is the one-shot the Settings "Switch" / "Add" buttons use.
 #[tauri::command]
 pub async fn switch_kubeconfig(
     state: State<'_, SharedBackend>,
@@ -348,17 +377,110 @@ pub async fn switch_kubeconfig(
                 b.manager.current_context = Some(ctx_name);
             }
         }
-        b.connected = false;
-        b.client = None;
-        b.cluster_version = None;
+        b.disconnect();
         b.settings.save_to_disk();
     }
     // Now connect with the freshly loaded config.
     connect(state).await
 }
 
+/// Register (if needed) + load a kubeconfig, select a SPECIFIC context, and connect.
+/// Used by the Dashboard when the user clicks a cluster card.
+#[tauri::command]
+pub async fn open_cluster(
+    state: State<'_, SharedBackend>,
+    path: Option<String>,
+    context: String,
+) -> Result<KubeStatus, String> {
+    {
+        let mut b = state.lock().await;
+        if let Some(p) = &path {
+            let id = b.settings.register_kubeconfig(p.clone());
+            if let Err(e) = b.manager.load_from_path(p) {
+                return Ok(b.status(Some(format!("Failed to load kubeconfig {p}: {e}"))));
+            }
+            b.settings.set_active_kubeconfig(&id);
+            b.settings.last_kubeconfig_path = Some(p.clone());
+        } else if b.manager.kubeconfig.is_none() {
+            if let Err(e) = b.manager.load_default() {
+                return Ok(b.status(Some(format!("Failed to load default kubeconfig: {e}"))));
+            }
+        }
+        if !b.manager.contexts.iter().any(|c| c.name == context) {
+            return Ok(b.status(Some(format!(
+                "Context '{context}' not found in the kubeconfig"
+            ))));
+        }
+        b.manager.current_context = Some(context);
+        b.disconnect();
+        b.settings.save_to_disk();
+    }
+    connect(state).await
+}
+
 // ============================================================================
-// Resource listing
+// Dashboard (cluster overview)  — DIRECT-only short-lived probes
+// ============================================================================
+
+/// List the contexts of an arbitrary kubeconfig file WITHOUT touching the active
+/// connection. None = default discovery. Used by the Dashboard.
+#[tauri::command]
+pub async fn kubeconfig_contexts(path: Option<String>) -> Result<Vec<ContextInfo>, String> {
+    let mut mgr = KubeConfigManager::new();
+    match &path {
+        Some(p) => mgr.load_from_path(p),
+        None => mgr.load_default(),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(mgr.contexts)
+}
+
+/// Live health snapshot for one cluster card on the Dashboard. Probes a
+/// (kubeconfig, context) pair with a dedicated short-lived client — the active
+/// connection is never disturbed. `namespace` scopes the pod/deployment counts.
+#[tauri::command]
+pub async fn cluster_summary(
+    path: Option<String>,
+    context: String,
+    namespace: Option<String>,
+) -> Result<ClusterSummary, String> {
+    let kc = match &path {
+        Some(p) => Kubeconfig::read_from(p),
+        None => Kubeconfig::read(),
+    };
+    let kc = match kc {
+        Ok(kc) => kc,
+        Err(e) => {
+            return Ok(ClusterSummary::unreachable(format!(
+                "kubeconfig error: {e}"
+            )))
+        }
+    };
+    let opts = KubeConfigOptions {
+        context: Some(context.clone()),
+        cluster: None,
+        user: None,
+    };
+    let scope = normalize_scope(namespace);
+
+    let probe = async {
+        let config = kube::Config::from_custom_kubeconfig(kc, &opts)
+            .await
+            .map_err(|e| format!("kubeconfig error: {e}"))?;
+        let client =
+            kube::Client::try_from(config).map_err(|e| format!("client build error: {e}"))?;
+        Ok::<_, String>(summarize(client, scope).await)
+    };
+
+    match tokio::time::timeout(Duration::from_secs(10), probe).await {
+        Ok(Ok(summary)) => Ok(summary),
+        Ok(Err(e)) => Ok(ClusterSummary::unreachable(e)),
+        Err(_) => Ok(ClusterSummary::unreachable("Timed out after 10s")),
+    }
+}
+
+// ============================================================================
+// Resource listing  (delegates to LocalKube)
 // ============================================================================
 
 #[tauri::command]
@@ -366,84 +488,27 @@ pub async fn list_pods(
     state: State<'_, SharedBackend>,
     namespace: Option<String>,
 ) -> Result<Vec<PodRow>, String> {
-    let client = require_client(&state).await?;
+    let active = require_active(&state).await?;
     let scope = normalize_scope(namespace);
-    let api: Api<Pod> = match &scope {
-        Some(ns) => Api::namespaced(client, ns),
-        None => Api::all(client),
-    };
-    let list = api
-        .list(&ListParams::default())
-        .await
-        .map_err(|e| log_err("list pods", e))?;
-    Ok(list.items.iter().map(pod_row).collect())
+    active.list_pods(scope.as_deref()).await
 }
 
 #[tauri::command]
 pub async fn list_nodes(state: State<'_, SharedBackend>) -> Result<Vec<NodeRow>, String> {
-    let client = require_client(&state).await?;
-    let api: Api<Node> = Api::all(client);
-    let list = api
-        .list(&ListParams::default())
-        .await
-        .map_err(|e| log_err("list nodes", e))?;
-    Ok(list.items.iter().map(node_row).collect())
+    let active = require_active(&state).await?;
+    active.list_nodes().await
 }
 
-/// Generic list: returns a headers+rows table projection for the given resource `kind`.
+/// Generic list: returns a headers+rows table projection for the given `kind`.
 #[tauri::command]
 pub async fn list_resource(
     state: State<'_, SharedBackend>,
     kind: String,
     namespace: Option<String>,
 ) -> Result<TableData, String> {
-    use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
-    use k8s_openapi::api::batch::v1::{CronJob, Job};
-    use k8s_openapi::api::core::v1::{
-        ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
-        ServiceAccount,
-    };
-    use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-    use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
-    use k8s_openapi::api::storage::v1::StorageClass;
-
-    let client = require_client(&state).await?;
+    let active = require_active(&state).await?;
     let scope = normalize_scope(namespace);
-
-    macro_rules! ns_table {
-        ($ty:ty, $proj:path) => {{
-            let items = list_namespaced::<$ty>(&client, &scope).await?;
-            $proj(&items)
-        }};
-    }
-    macro_rules! all_table {
-        ($ty:ty, $proj:path) => {{
-            let items = list_cluster::<$ty>(&client).await?;
-            $proj(&items)
-        }};
-    }
-
-    let table = match kind.as_str() {
-        "namespaces" => all_table!(Namespace, store::namespaces_table),
-        "services" => ns_table!(Service, store::services_table),
-        "deployments" => ns_table!(Deployment, store::deployments_table),
-        "statefulsets" => ns_table!(StatefulSet, store::statefulsets_table),
-        "daemonsets" => ns_table!(DaemonSet, store::daemonsets_table),
-        "jobs" => ns_table!(Job, store::jobs_table),
-        "cronjobs" => ns_table!(CronJob, store::cronjobs_table),
-        "configmaps" => ns_table!(ConfigMap, store::configmaps_table),
-        "secrets" => ns_table!(Secret, store::secrets_table),
-        "pvcs" => ns_table!(PersistentVolumeClaim, store::pvcs_table),
-        "pvs" => all_table!(PersistentVolume, store::pvs_table),
-        "storageclasses" => all_table!(StorageClass, store::storage_classes_table),
-        "ingresses" => ns_table!(Ingress, store::ingresses_table),
-        "networkpolicies" => ns_table!(NetworkPolicy, store::network_policies_table),
-        "serviceaccounts" => ns_table!(ServiceAccount, store::service_accounts_table),
-        "roles" => ns_table!(Role, store::roles_table),
-        "rolebindings" => ns_table!(RoleBinding, store::role_bindings_table),
-        other => return Err(format!("Unknown resource kind: {other}")),
-    };
-    Ok(table)
+    active.list_resource(&kind, scope.as_deref()).await
 }
 
 /// Fetch full detail (metadata + manifest) for a single resource of any kind.
@@ -454,58 +519,64 @@ pub async fn get_resource(
     namespace: Option<String>,
     name: String,
 ) -> Result<ResourceDetail, String> {
-    use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
-    use k8s_openapi::api::batch::v1::{CronJob, Job};
-    use k8s_openapi::api::core::v1::{
-        ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
-        ServiceAccount,
-    };
-    use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-    use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
-    use k8s_openapi::api::storage::v1::StorageClass;
+    let active = require_active(&state).await?;
+    let scope = normalize_scope(namespace);
+    active.get_resource(&kind, scope.as_deref(), &name).await
+}
 
-    let client = require_client(&state).await?;
-    let ns = normalize_scope(namespace);
+// ============================================================================
+// Resource actions (delete / restart / edit)
+// ============================================================================
 
-    macro_rules! ns_detail {
-        ($ty:ty) => {{
-            let ns = ns
-                .as_deref()
-                .ok_or("A namespace is required for this resource")?;
-            let obj = get_namespaced::<$ty>(&client, ns, &name).await?;
-            to_detail(obj, &kind)?
-        }};
-    }
-    macro_rules! cluster_detail {
-        ($ty:ty) => {{
-            let obj = get_cluster::<$ty>(&client, &name).await?;
-            to_detail(obj, &kind)?
-        }};
-    }
+/// Delete a single resource of any supported kind.
+#[tauri::command]
+pub async fn delete_resource(
+    state: State<'_, SharedBackend>,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+) -> Result<(), String> {
+    let active = require_active(&state).await?;
+    let scope = normalize_scope(namespace);
+    active.delete_resource(&kind, scope.as_deref(), &name).await
+}
 
-    let detail = match kind.as_str() {
-        "pods" => ns_detail!(Pod),
-        "nodes" => cluster_detail!(Node),
-        "namespaces" => cluster_detail!(Namespace),
-        "services" => ns_detail!(Service),
-        "deployments" => ns_detail!(Deployment),
-        "statefulsets" => ns_detail!(StatefulSet),
-        "daemonsets" => ns_detail!(DaemonSet),
-        "jobs" => ns_detail!(Job),
-        "cronjobs" => ns_detail!(CronJob),
-        "configmaps" => ns_detail!(ConfigMap),
-        "secrets" => ns_detail!(Secret),
-        "pvcs" => ns_detail!(PersistentVolumeClaim),
-        "pvs" => cluster_detail!(PersistentVolume),
-        "storageclasses" => cluster_detail!(StorageClass),
-        "ingresses" => ns_detail!(Ingress),
-        "networkpolicies" => ns_detail!(NetworkPolicy),
-        "serviceaccounts" => ns_detail!(ServiceAccount),
-        "roles" => ns_detail!(Role),
-        "rolebindings" => ns_detail!(RoleBinding),
-        other => return Err(format!("Unknown resource kind: {other}")),
-    };
-    Ok(detail)
+/// Rolling restart for workloads; for a pod this deletes it (controller recreates).
+#[tauri::command]
+pub async fn restart_resource(
+    state: State<'_, SharedBackend>,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+) -> Result<(), String> {
+    let active = require_active(&state).await?;
+    let scope = normalize_scope(namespace);
+    active
+        .restart_resource(&kind, scope.as_deref(), &name)
+        .await
+}
+
+/// Replace a ConfigMap's `data` map (keys absent from `data` are removed).
+#[tauri::command]
+pub async fn update_configmap(
+    state: State<'_, SharedBackend>,
+    namespace: String,
+    name: String,
+    data: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let active = require_active(&state).await?;
+    active.update_configmap(&namespace, &name, data).await
+}
+
+/// `kubectl describe pod`-style text report (status, containers, events).
+#[tauri::command]
+pub async fn describe_pod(
+    state: State<'_, SharedBackend>,
+    namespace: String,
+    name: String,
+) -> Result<String, String> {
+    let active = require_active(&state).await?;
+    active.describe_pod(&namespace, &name).await
 }
 
 // ============================================================================
@@ -520,7 +591,7 @@ pub async fn stream_logs(
     container: Option<String>,
     on_event: Channel<LogEvent>,
 ) -> Result<u64, String> {
-    let client = require_client(&state).await?;
+    let active = require_active(&state).await?;
 
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
     let id = {
@@ -531,60 +602,19 @@ pub async fn stream_logs(
         id
     };
 
+    // Either transport's stream is forwarded into the Channel until it ends or the
+    // oneshot fires (stop_logs / window close). A Remote stream's task drop closes
+    // the reqwest SSE connection; a Local stream's drop closes the kube watch.
+    let mut stream = active.log_stream(namespace, pod, container, 200);
     tokio::spawn(async move {
-        use futures_util::io::AsyncBufReadExt;
-        use futures_util::StreamExt;
-        use kube::api::LogParams;
-
-        let pods: Api<Pod> = Api::namespaced(client, &namespace);
-        let params = LogParams {
-            follow: true,
-            tail_lines: Some(200),
-            timestamps: true,
-            container: container.clone(),
-            ..Default::default()
-        };
-
-        let _ = on_event.send(LogEvent {
-            kind: "header".into(),
-            line: format!("--- Streaming logs for {namespace}/{pod} ---"),
-        });
-
-        match pods.log_stream(&pod, &params).await {
-            Ok(logs) => {
-                let mut lines = logs.lines();
-                tokio::select! {
-                    _ = async {
-                        while let Some(result) = lines.next().await {
-                            match result {
-                                Ok(line) if !line.is_empty() => {
-                                    let _ = on_event.send(LogEvent { kind: "line".into(), line });
-                                }
-                                Ok(_) => {}
-                                Err(e) => {
-                                    let _ = on_event.send(LogEvent {
-                                        kind: "error".into(),
-                                        line: format!("Error reading log line: {e}"),
-                                    });
-                                    break;
-                                }
-                            }
-                        }
-                    } => {}
-                    _ = cancel_rx => {}
+        tokio::select! {
+            _ = async {
+                while let Some(ev) = stream.next().await {
+                    let _ = on_event.send(ev);
                 }
-            }
-            Err(e) => {
-                let _ = on_event.send(LogEvent {
-                    kind: "error".into(),
-                    line: format!("Failed to open log stream: {e}"),
-                });
-            }
+            } => {}
+            _ = cancel_rx => {}
         }
-        let _ = on_event.send(LogEvent {
-            kind: "ended".into(),
-            line: String::new(),
-        });
     });
 
     Ok(id)
@@ -602,239 +632,162 @@ pub async fn stop_logs(state: State<'_, SharedBackend>, id: u64) -> Result<(), S
 // Helpers
 // ============================================================================
 
-async fn require_client(state: &State<'_, SharedBackend>) -> Result<kube::Client, String> {
+/// Clone the active connection out of the lock (held only briefly) — slow network
+/// work then runs without holding the mutex. Both transports are Arc-cheap to clone.
+async fn require_active(state: &State<'_, SharedBackend>) -> Result<Active, String> {
     state
         .lock()
         .await
-        .client
+        .active
         .clone()
         .ok_or_else(|| "Not connected to a cluster".to_string())
 }
 
-/// Stringify an API error AND write it to the log — list/get failures must never
-/// be silent (e.g. RBAC 403s on cluster-wide lists for namespace-scoped users).
-fn log_err(what: &str, e: impl std::fmt::Display) -> String {
-    let msg = e.to_string();
-    tracing::warn!("{what} failed: {msg}");
-    msg
+// ============================================================================
+// Connection management (Remote connections + unified select/remove)
+// ============================================================================
+
+/// Register a remote backend connection (or update it if the endpoint exists).
+#[tauri::command]
+pub async fn add_remote_connection(
+    state: State<'_, SharedBackend>,
+    name: String,
+    endpoint: String,
+    ca_path: Option<String>,
+    insecure: bool,
+) -> Result<AppState, String> {
+    let mut b = state.lock().await;
+    b.settings.add_remote(name, endpoint, ca_path, insecure);
+    b.settings.save_to_disk();
+    Ok(b.settings.clone())
 }
 
-/// "All" / empty → cluster-wide (None); otherwise a concrete namespace.
-fn normalize_scope(namespace: Option<String>) -> Option<String> {
-    match namespace {
-        Some(ns) if ns != "All" && !ns.trim().is_empty() => Some(ns),
-        _ => None,
+/// Edit an existing connection (Direct or Remote) in place and persist settings.
+/// Keeps the entry's id stable; `endpoint`/`ca_path`/`insecure` are ignored for
+/// Direct entries. Returns the updated settings.
+#[tauri::command]
+pub async fn update_connection(
+    state: State<'_, SharedBackend>,
+    id: String,
+    name: String,
+    description: Option<String>,
+    namespace: Option<String>,
+    endpoint: Option<String>,
+    ca_path: Option<String>,
+    insecure: bool,
+) -> Result<AppState, String> {
+    let mut b = state.lock().await;
+    if !b
+        .settings
+        .update_connection(&id, name, description, namespace, endpoint, ca_path, insecure)
+    {
+        return Err(format!("Connection '{id}' not found"));
+    }
+    b.settings.save_to_disk();
+    Ok(b.settings.clone())
+}
+
+/// Remove any connection (Direct or Remote) by id and persist settings.
+#[tauri::command]
+pub async fn remove_connection(
+    state: State<'_, SharedBackend>,
+    id: String,
+) -> Result<AppState, String> {
+    let mut b = state.lock().await;
+    b.settings.unregister_kubeconfig_by_id(&id);
+    b.settings.save_to_disk();
+    Ok(b.settings.clone())
+}
+
+/// Probe a remote endpoint WITHOUT making it active (Settings "Test" button).
+#[tauri::command]
+pub async fn test_remote_connection(
+    endpoint: String,
+    ca_path: Option<String>,
+    insecure: bool,
+) -> Result<KubeStatus, String> {
+    let ca_pem = read_ca(&ca_path)?;
+    let mut remote = RemoteKube::new(endpoint.clone(), ca_pem, insecure)?;
+    match remote.refresh_status().await {
+        Ok(st) => Ok(KubeStatus {
+            connected: true,
+            cluster_version: Some(st.cluster_version),
+            kubeconfig_path: Some(endpoint),
+            ..Default::default()
+        }),
+        Err(e) => Ok(KubeStatus {
+            connected: false,
+            kubeconfig_path: Some(endpoint),
+            error: Some(e),
+            ..Default::default()
+        }),
     }
 }
 
-async fn list_cluster<K>(client: &kube::Client) -> Result<Vec<K>, String>
-where
-    K: kube::Resource + Clone + serde::de::DeserializeOwned + std::fmt::Debug,
-    <K as kube::Resource>::DynamicType: Default,
-{
-    let api: Api<K> = Api::all(client.clone());
-    api.list(&ListParams::default())
-        .await
-        .map(|l| l.items)
-        .map_err(|e| log_err(&format!("list {}", short_kind::<K>()), e))
-}
-
-async fn list_namespaced<K>(client: &kube::Client, scope: &Option<String>) -> Result<Vec<K>, String>
-where
-    K: kube::Resource<Scope = NamespaceResourceScope>
-        + Clone
-        + serde::de::DeserializeOwned
-        + std::fmt::Debug,
-    <K as kube::Resource>::DynamicType: Default,
-{
-    let api: Api<K> = match scope {
-        Some(ns) => Api::namespaced(client.clone(), ns),
-        None => Api::all(client.clone()),
+/// Dashboard remote-card probe: a non-disturbing `GET /summary` for one remote
+/// connection (mirrors `cluster_summary` for Direct connections).
+#[tauri::command]
+pub async fn remote_summary(
+    state: State<'_, SharedBackend>,
+    connection_id: String,
+) -> Result<ClusterSummary, String> {
+    let (endpoint, ca_path, insecure) = {
+        let b = state.lock().await;
+        let Some(entry) = b
+            .settings
+            .kubeconfigs
+            .iter()
+            .find(|k| k.id == connection_id)
+        else {
+            return Ok(ClusterSummary::unreachable(format!(
+                "Connection '{connection_id}' not found"
+            )));
+        };
+        let Some(endpoint) = entry.endpoint.clone() else {
+            return Ok(ClusterSummary::unreachable(
+                "Remote connection has no endpoint",
+            ));
+        };
+        (endpoint, entry.ca_path.clone(), entry.insecure)
     };
-    api.list(&ListParams::default())
-        .await
-        .map(|l| l.items)
-        .map_err(|e| log_err(&format!("list {}", short_kind::<K>()), e))
-}
-
-async fn get_namespaced<K>(client: &kube::Client, namespace: &str, name: &str) -> Result<K, String>
-where
-    K: kube::Resource<Scope = NamespaceResourceScope>
-        + Clone
-        + serde::de::DeserializeOwned
-        + std::fmt::Debug,
-    <K as kube::Resource>::DynamicType: Default,
-{
-    let api: Api<K> = Api::namespaced(client.clone(), namespace);
-    api.get(name)
-        .await
-        .map_err(|e| log_err(&format!("get {}", short_kind::<K>()), e))
-}
-
-async fn get_cluster<K>(client: &kube::Client, name: &str) -> Result<K, String>
-where
-    K: kube::Resource + Clone + serde::de::DeserializeOwned + std::fmt::Debug,
-    <K as kube::Resource>::DynamicType: Default,
-{
-    let api: Api<K> = Api::all(client.clone());
-    api.get(name)
-        .await
-        .map_err(|e| log_err(&format!("get {}", short_kind::<K>()), e))
-}
-
-/// Last path segment of a type name, e.g. "…::core::v1::Pod" → "Pod".
-fn short_kind<K>() -> &'static str {
-    std::any::type_name::<K>()
-        .rsplit("::")
-        .next()
-        .unwrap_or("?")
-}
-
-/// Project any fetched object into a [`ResourceDetail`] (metadata + JSON manifest).
-fn to_detail<K>(mut obj: K, kind: &str) -> Result<ResourceDetail, String>
-where
-    K: kube::Resource + serde::Serialize,
-{
-    // managedFields is verbose server bookkeeping — drop it from the manifest view.
-    obj.meta_mut().managed_fields = None;
-
-    let meta = obj.meta();
-    let name = meta.name.clone().unwrap_or_default();
-    let namespace = meta.namespace.clone();
-    let age = human_age(meta.creation_timestamp.as_ref());
-    let labels = meta
-        .labels
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let annotations = meta
-        .annotations
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let manifest = serde_json::to_string_pretty(&obj).map_err(|e| e.to_string())?;
-
-    Ok(ResourceDetail {
-        kind: kind.to_string(),
-        name,
-        namespace,
-        age,
-        labels,
-        annotations,
-        manifest,
-    })
-}
-
-/// Connectivity probe + version fetch. Hits the apiserver `/version` endpoint,
-/// which requires no RBAC (so it works for any authenticated user, unlike listing
-/// nodes) and forces a real network round-trip + TLS handshake. The error is
-/// returned — never swallowed — so a failed connection surfaces its true cause.
-async fn probe_cluster_version(client: &kube::Client) -> Result<String, String> {
-    let info = client
-        .apiserver_version()
-        .await
-        .map_err(|e| e.to_string())?;
-    // e.g. "v1.29.4+k3s1"; fall back to major.minor if git_version is blank.
-    Ok(if info.git_version.is_empty() {
-        format!("v{}.{}", info.major, info.minor)
-    } else {
-        info.git_version
-    })
-}
-
-// === Pod / Node projections (ported from the egui app) ===
-
-fn pod_row(pod: &Pod) -> PodRow {
-    let status = pod.status.as_ref();
-    let containers = pod
-        .spec
-        .as_ref()
-        .map(|s| s.containers.iter().map(|c| c.name.clone()).collect())
-        .unwrap_or_default();
-
-    let (ready, total) = status
-        .and_then(|s| s.container_statuses.as_ref())
-        .map(|cs| (cs.iter().filter(|c| c.ready).count(), cs.len()))
-        .unwrap_or((0, 0));
-
-    let restarts = status
-        .and_then(|s| s.container_statuses.as_ref())
-        .map(|cs| cs.iter().map(|c| c.restart_count as u32).sum())
-        .unwrap_or(0);
-
-    PodRow {
-        name: pod
-            .metadata
-            .name
-            .clone()
-            .unwrap_or_else(|| "unknown".into()),
-        namespace: pod
-            .metadata
-            .namespace
-            .clone()
-            .unwrap_or_else(|| "default".into()),
-        phase: status
-            .and_then(|s| s.phase.clone())
-            .unwrap_or_else(|| "Unknown".into()),
-        ready: format!("{ready}/{total}"),
-        restarts,
-        age: human_age(pod.metadata.creation_timestamp.as_ref()),
-        node: pod
-            .spec
-            .as_ref()
-            .and_then(|s| s.node_name.clone())
-            .unwrap_or_else(|| "-".into()),
-        containers,
+    let ca_pem = match read_ca(&ca_path) {
+        Ok(v) => v,
+        Err(e) => return Ok(ClusterSummary::unreachable(e)),
+    };
+    let remote = match RemoteKube::new(endpoint, ca_pem, insecure) {
+        Ok(r) => r,
+        Err(e) => return Ok(ClusterSummary::unreachable(e)),
+    };
+    match remote.summary().await {
+        Ok(s) => Ok(s),
+        Err(e) => Ok(ClusterSummary::unreachable(e)),
     }
 }
 
-fn node_row(node: &Node) -> NodeRow {
-    let status = node
-        .status
-        .as_ref()
-        .and_then(|s| s.conditions.as_ref())
-        .and_then(|conds| conds.iter().find(|c| c.type_ == "Ready"))
-        .map(|c| {
-            if c.status == "True" {
-                "Ready"
-            } else {
-                "NotReady"
-            }
-        })
-        .unwrap_or("Unknown")
-        .to_string();
-
-    let roles = node
-        .metadata
-        .labels
-        .as_ref()
-        .map(|labels| {
-            if labels.contains_key("node-role.kubernetes.io/control-plane")
-                || labels.contains_key("node-role.kubernetes.io/master")
-            {
-                "control-plane".to_string()
-            } else {
-                "worker".to_string()
-            }
-        })
-        .unwrap_or_else(|| "worker".into());
-
-    NodeRow {
-        name: node
-            .metadata
-            .name
-            .clone()
-            .unwrap_or_else(|| "unknown".into()),
-        status,
-        roles,
-        version: node
-            .status
-            .as_ref()
-            .and_then(|s| s.node_info.as_ref())
-            .map(|i| i.kubelet_version.clone())
-            .unwrap_or_else(|| "unknown".into()),
-        age: human_age(node.metadata.creation_timestamp.as_ref()),
+/// Make a connection active and connect to it, dispatching by its mode. Direct
+/// connections behave like `switch_kubeconfig`; Remote connections build a client
+/// and probe the backend.
+#[tauri::command]
+pub async fn select_connection(
+    state: State<'_, SharedBackend>,
+    id: String,
+) -> Result<KubeStatus, String> {
+    let entry = {
+        state
+            .lock()
+            .await
+            .settings
+            .kubeconfigs
+            .iter()
+            .find(|k| k.id == id)
+            .cloned()
+    };
+    let Some(entry) = entry else {
+        let b = state.lock().await;
+        return Ok(b.status(Some(format!("Connection '{id}' not found"))));
+    };
+    match entry.mode {
+        ConnMode::Remote => connect_remote(state, id).await,
+        ConnMode::Direct => switch_kubeconfig(state, entry.path).await,
     }
 }

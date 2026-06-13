@@ -1,0 +1,42 @@
+# kubefront-backend configuration.
+#
+# This server holds the real kube::Client for each cluster and exposes a REST API
+# that the KubeFront desktop app consumes through a reverse proxy on :443. It
+# performs NO authentication itself — it TRUSTS THE REVERSE PROXY to terminate TLS
+# and authenticate. Therefore bind it to a non-public interface (default loopback)
+# and let only the proxy reach it.
+#
+# URL shape seen by this server (after the proxy strips its own site segment):
+#   /<connection-id>/api/<resource...>
+# e.g. the proxy maps  https://host/k3s-server1/connection1/api/pods
+#      to this backend  /connection1/api/pods   (with base_path = "/").
+
+# Address to bind. Default loopback; a non-loopback bind logs a loud warning.
+listen = "127.0.0.1:8080"
+
+# Mount prefix. "/" means the proxy strips its site segment and forwards
+# "/<conn>/api/...". Set to "/k3s-server1" if the proxy forwards the segment intact.
+base_path = "/"
+
+# Seconds to wait when first connecting a cluster (client build + version probe).
+request_timeout_secs = 15
+
+# Default number of trailing log lines for the logs SSE endpoint.
+log_request_tail = 200
+
+# One [[connection]] per cluster this backend exposes. `id` is the URL segment.
+[[connection]]
+id = "connection1"                              # ^[a-z0-9][a-z0-9-]{0,62}$ and not "api"
+name = "K3S Server 1"                           # friendly label (shown in the desktop UI)
+kubeconfig = "/etc/kubefront/k3s-server1.yaml"  # absolute path on THIS host
+context = "default"                             # context within that kubeconfig
+namespace = ""                                  # optional scope; "" = all namespaces
+read_only = false                               # true ⇒ DELETE/restart/PUT return 403
+
+# [[connection]]
+# id = "connection2"
+# name = "EKS Staging"
+# kubeconfig = "/etc/kubefront/eks-staging.yaml"
+# context = "staging"
+# namespace = "team-a"
+# read_only = true

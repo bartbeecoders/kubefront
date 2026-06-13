@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CopyButton } from "./CopyButton";
 
 export interface LogLine {
   text: string;
@@ -108,15 +109,11 @@ export function LogWindow({ win, index, onClose, onPatch, onChangeContainer }: P
           style={{ flex: 1, minWidth: 80 }}
         />
 
-        <button
-          className="btn sm"
-          onClick={() => {
-            const text = visible.map((l) => l.text).join("\n");
-            navigator.clipboard?.writeText(text).catch(() => {});
-          }}
-        >
-          Copy
-        </button>
+        <CopyButton
+          text={() => visible.map((l) => l.text).join("\n")}
+          title="Copy visible log lines"
+          label="Copy"
+        />
         <button className="btn sm" onClick={() => onPatch(win.id, { lines: [] })}>
           Clear
         </button>

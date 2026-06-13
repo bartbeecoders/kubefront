@@ -1,31 +1,36 @@
-//! Central store for fetched cluster resources + projection helpers.
+//! Resource projection helpers shared by the desktop app and the backend.
 //!
-//! All resource lists (other than Pods/Nodes, which live directly on the app
-//! for the legacy detail/log flows) are kept here in [`ClusterResources`].
-//! Background tasks deliver updates as a single [`ResourceUpdate`] enum so the
-//! event channel doesn't explode with one variant per resource type.
-//!
-//! Each resource type also has a small projection function that turns a slice
-//! into a [`TableData`] (headers + string rows) which the generic table widget
-//! in `ui::components` renders. This keeps `app.rs` free of K8s field plumbing.
+//! Each resource type has a small projection function that turns a slice into a
+//! [`TableData`] (headers + string rows) which the generic table renderer shows.
+//! This keeps the command/handler layers free of K8s field plumbing.
 
 use chrono::{DateTime, Utc};
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service, ServiceAccount,
+    ConfigMap, Event, Namespace, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
+    ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
 use k8s_openapi::api::storage::v1::StorageClass;
+use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
 
 /// A simple headers + rows projection used by the generic table renderer.
-#[derive(serde::Serialize)]
+/// `headers` is owned (`Vec<String>`) so the type round-trips over JSON (the
+/// backend serializes it; the desktop `RemoteKube` deserializes it).
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TableData {
-    pub headers: Vec<&'static str>,
+    pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
+}
+
+/// Build a `Vec<String>` of column headers from string literals — keeps the
+/// projection call-sites terse now that `headers` is owned.
+macro_rules! hdr {
+    ($($h:expr),* $(,)?) => { vec![$($h.to_string()),*] };
 }
 
 // === Shared metadata helpers ===
@@ -75,7 +80,7 @@ pub fn human_age(ts: Option<&Time>) -> String {
 
 pub fn namespaces_table(items: &[Namespace]) -> TableData {
     TableData {
-        headers: vec!["Name", "Status", "Age"],
+        headers: hdr!["Name", "Status", "Age"],
         rows: items
             .iter()
             .map(|ns| {
@@ -92,7 +97,7 @@ pub fn namespaces_table(items: &[Namespace]) -> TableData {
 
 pub fn services_table(items: &[Service]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Type", "Cluster IP", "Ports", "Age"],
+        headers: hdr!["Name", "Namespace", "Type", "Cluster IP", "Ports", "Age"],
         rows: items
             .iter()
             .map(|svc| {
@@ -131,7 +136,7 @@ pub fn services_table(items: &[Service]) -> TableData {
 
 pub fn deployments_table(items: &[Deployment]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Namespace",
             "Ready",
@@ -162,7 +167,7 @@ pub fn deployments_table(items: &[Deployment]) -> TableData {
 
 pub fn statefulsets_table(items: &[StatefulSet]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Ready", "Age"],
+        headers: hdr!["Name", "Namespace", "Ready", "Age"],
         rows: items
             .iter()
             .map(|s| {
@@ -185,7 +190,7 @@ pub fn statefulsets_table(items: &[StatefulSet]) -> TableData {
 
 pub fn daemonsets_table(items: &[DaemonSet]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Namespace",
             "Desired",
@@ -221,7 +226,7 @@ pub fn daemonsets_table(items: &[DaemonSet]) -> TableData {
 
 pub fn jobs_table(items: &[Job]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Completions", "Age"],
+        headers: hdr!["Name", "Namespace", "Completions", "Age"],
         rows: items
             .iter()
             .map(|j| {
@@ -240,7 +245,7 @@ pub fn jobs_table(items: &[Job]) -> TableData {
 
 pub fn cronjobs_table(items: &[CronJob]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Namespace",
             "Schedule",
@@ -285,7 +290,7 @@ pub fn cronjobs_table(items: &[CronJob]) -> TableData {
 
 pub fn configmaps_table(items: &[ConfigMap]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Data", "Age"],
+        headers: hdr!["Name", "Namespace", "Data", "Age"],
         rows: items
             .iter()
             .map(|cm| {
@@ -304,7 +309,7 @@ pub fn configmaps_table(items: &[ConfigMap]) -> TableData {
 
 pub fn secrets_table(items: &[Secret]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Type", "Data", "Age"],
+        headers: hdr!["Name", "Namespace", "Type", "Data", "Age"],
         rows: items
             .iter()
             .map(|s| {
@@ -325,7 +330,7 @@ pub fn secrets_table(items: &[Secret]) -> TableData {
 
 pub fn pvcs_table(items: &[PersistentVolumeClaim]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Namespace",
             "Status",
@@ -375,7 +380,7 @@ pub fn pvcs_table(items: &[PersistentVolumeClaim]) -> TableData {
 
 pub fn pvs_table(items: &[PersistentVolume]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Capacity",
             "Access Modes",
@@ -424,7 +429,7 @@ pub fn pvs_table(items: &[PersistentVolume]) -> TableData {
 
 pub fn storage_classes_table(items: &[StorageClass]) -> TableData {
     TableData {
-        headers: vec![
+        headers: hdr![
             "Name",
             "Provisioner",
             "Reclaim Policy",
@@ -448,7 +453,7 @@ pub fn storage_classes_table(items: &[StorageClass]) -> TableData {
 
 pub fn ingresses_table(items: &[Ingress]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Class", "Hosts", "Age"],
+        headers: hdr!["Name", "Namespace", "Class", "Hosts", "Age"],
         rows: items
             .iter()
             .map(|ing| {
@@ -481,7 +486,7 @@ pub fn ingresses_table(items: &[Ingress]) -> TableData {
 
 pub fn network_policies_table(items: &[NetworkPolicy]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Pod Selector", "Age"],
+        headers: hdr!["Name", "Namespace", "Pod Selector", "Age"],
         rows: items
             .iter()
             .map(|np| {
@@ -515,7 +520,7 @@ pub fn network_policies_table(items: &[NetworkPolicy]) -> TableData {
 
 pub fn service_accounts_table(items: &[ServiceAccount]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Secrets", "Age"],
+        headers: hdr!["Name", "Namespace", "Secrets", "Age"],
         rows: items
             .iter()
             .map(|sa| {
@@ -533,7 +538,7 @@ pub fn service_accounts_table(items: &[ServiceAccount]) -> TableData {
 
 pub fn roles_table(items: &[Role]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Rules", "Age"],
+        headers: hdr!["Name", "Namespace", "Rules", "Age"],
         rows: items
             .iter()
             .map(|r| {
@@ -549,9 +554,37 @@ pub fn roles_table(items: &[Role]) -> TableData {
     }
 }
 
+pub fn crds_table(items: &[CustomResourceDefinition]) -> TableData {
+    TableData {
+        headers: hdr!["Name", "Group", "Kind", "Scope", "Version", "Age"],
+        rows: items
+            .iter()
+            .map(|crd| {
+                let spec = &crd.spec;
+                // Prefer the storage version, falling back to the first served one.
+                let version = spec
+                    .versions
+                    .iter()
+                    .find(|v| v.storage)
+                    .or_else(|| spec.versions.first())
+                    .map(|v| v.name.clone())
+                    .unwrap_or_else(|| "-".into());
+                vec![
+                    obj_name(&crd.metadata),
+                    spec.group.clone(),
+                    spec.names.kind.clone(),
+                    spec.scope.clone(),
+                    version,
+                    obj_age(&crd.metadata),
+                ]
+            })
+            .collect(),
+    }
+}
+
 pub fn role_bindings_table(items: &[RoleBinding]) -> TableData {
     TableData {
-        headers: vec!["Name", "Namespace", "Role", "Subjects", "Age"],
+        headers: hdr!["Name", "Namespace", "Role", "Subjects", "Age"],
         rows: items
             .iter()
             .map(|rb| {
@@ -576,4 +609,237 @@ pub fn role_bindings_table(items: &[RoleBinding]) -> TableData {
             })
             .collect(),
     }
+}
+
+// === Pod describe (kubectl-describe-style text) ===
+
+/// Build a human-readable `kubectl describe`-style report for a pod. `events`
+/// are the pod's involvedObject events (best-effort; may be empty). The output
+/// is plain monospace text rendered in a modal.
+pub fn describe_pod(pod: &Pod, events: &[Event]) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let m = &pod.metadata;
+
+    let _ = writeln!(s, "Name:             {}", m.name.as_deref().unwrap_or("-"));
+    let _ = writeln!(
+        s,
+        "Namespace:        {}",
+        m.namespace.as_deref().unwrap_or("-")
+    );
+
+    if let Some(spec) = &pod.spec {
+        if let Some(pc) = &spec.priority_class_name {
+            let _ = writeln!(s, "Priority Class:   {pc}");
+        }
+        if let Some(sa) = &spec.service_account_name {
+            let _ = writeln!(s, "Service Account:  {sa}");
+        }
+        let _ = writeln!(
+            s,
+            "Node:             {}",
+            spec.node_name.as_deref().unwrap_or("<none>")
+        );
+    }
+
+    if let Some(st) = &pod.status {
+        if let Some(start) = &st.start_time {
+            let _ = writeln!(s, "Start Time:       {}", start.0);
+        }
+    }
+    let _ = write!(s, "Labels:           ");
+    write_map_block(&mut s, m.labels.as_ref(), 18);
+    let _ = write!(s, "Annotations:      ");
+    write_map_block(&mut s, m.annotations.as_ref(), 18);
+
+    if let Some(st) = &pod.status {
+        let _ = writeln!(
+            s,
+            "Status:           {}",
+            st.phase.as_deref().unwrap_or("-")
+        );
+        if let Some(reason) = &st.reason {
+            let _ = writeln!(s, "Reason:           {reason}");
+        }
+        if let Some(ip) = &st.pod_ip {
+            let _ = writeln!(s, "IP:               {ip}");
+        }
+        if let Some(qos) = &st.qos_class {
+            let _ = writeln!(s, "QoS Class:        {qos}");
+        }
+    }
+
+    // --- Containers ---
+    if let Some(spec) = &pod.spec {
+        let statuses = pod
+            .status
+            .as_ref()
+            .and_then(|s| s.container_statuses.as_ref());
+        let _ = writeln!(s, "Containers:");
+        for c in &spec.containers {
+            let cs = statuses.and_then(|all| all.iter().find(|x| x.name == c.name));
+            let _ = writeln!(s, "  {}:", c.name);
+            let _ = writeln!(
+                s,
+                "    Image:          {}",
+                c.image.as_deref().unwrap_or("-")
+            );
+            if let Some(ports) = &c.ports {
+                let p = ports
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{}/{}",
+                            p.container_port,
+                            p.protocol.as_deref().unwrap_or("TCP")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = writeln!(s, "    Port(s):        {p}");
+            }
+            if let Some(cs) = cs {
+                let (state, detail) = container_state(cs);
+                let _ = writeln!(s, "    State:          {state}");
+                if let Some(d) = detail {
+                    let _ = writeln!(s, "      {d}");
+                }
+                let _ = writeln!(s, "    Ready:          {}", cs.ready);
+                let _ = writeln!(s, "    Restart Count:  {}", cs.restart_count);
+            }
+            if let Some(res) = &c.resources {
+                write_quantities(&mut s, "Requests", res.requests.as_ref());
+                write_quantities(&mut s, "Limits", res.limits.as_ref());
+            }
+        }
+    }
+
+    // --- Conditions ---
+    if let Some(conds) = pod.status.as_ref().and_then(|s| s.conditions.as_ref()) {
+        if !conds.is_empty() {
+            let _ = writeln!(s, "Conditions:");
+            let _ = writeln!(s, "  {:<18}Status", "Type");
+            for c in conds {
+                let _ = writeln!(s, "  {:<18}{}", c.type_, c.status);
+            }
+        }
+    }
+
+    // --- Events --- (the part that makes describe worth it)
+    let _ = writeln!(s, "Events:");
+    if events.is_empty() {
+        let _ = writeln!(s, "  <none>");
+    } else {
+        // Newest last, like kubectl (sort by last timestamp ascending).
+        let mut evs: Vec<&Event> = events.iter().collect();
+        evs.sort_by_key(|a| event_time(a));
+        let _ = writeln!(
+            s,
+            "  {:<8}{:<22}{:<7}{:<24}Message",
+            "Type", "Reason", "Age", "From"
+        );
+        for e in evs {
+            let age = human_age(e.last_timestamp.as_ref().or(e.first_timestamp.as_ref()));
+            let count = e.count.unwrap_or(1);
+            let age = if count > 1 {
+                format!("{age} (x{count})")
+            } else {
+                age
+            };
+            let from = e
+                .source
+                .as_ref()
+                .and_then(|src| src.component.clone())
+                .unwrap_or_else(|| "-".into());
+            let _ = writeln!(
+                s,
+                "  {:<8}{:<22}{:<7}{:<24}{}",
+                e.type_.as_deref().unwrap_or("-"),
+                e.reason.as_deref().unwrap_or("-"),
+                age,
+                from,
+                e.message.as_deref().unwrap_or("-").trim()
+            );
+        }
+    }
+
+    s
+}
+
+/// Container state as (one-word state, optional detail line).
+fn container_state(cs: &k8s_openapi::api::core::v1::ContainerStatus) -> (String, Option<String>) {
+    let Some(state) = &cs.state else {
+        return ("Unknown".into(), None);
+    };
+    if let Some(r) = &state.running {
+        let started = r.started_at.as_ref().map(|t| format!("Started: {}", t.0));
+        ("Running".into(), started)
+    } else if let Some(w) = &state.waiting {
+        let reason = w.reason.clone().unwrap_or_default();
+        let detail = w.message.clone().map(|m| format!("Message: {m}"));
+        (format!("Waiting ({reason})"), detail)
+    } else if let Some(t) = &state.terminated {
+        let reason = t.reason.clone().unwrap_or_default();
+        (
+            format!("Terminated ({reason})"),
+            Some(format!("Exit Code: {}", t.exit_code)),
+        )
+    } else {
+        ("Unknown".into(), None)
+    }
+}
+
+/// Write a `requests`/`limits` quantity block (indented under a container).
+fn write_quantities(
+    s: &mut String,
+    label: &str,
+    q: Option<
+        &std::collections::BTreeMap<
+            String,
+            k8s_openapi::apimachinery::pkg::api::resource::Quantity,
+        >,
+    >,
+) {
+    use std::fmt::Write;
+    let Some(q) = q else { return };
+    if q.is_empty() {
+        return;
+    }
+    let _ = writeln!(s, "    {label}:");
+    for (k, v) in q {
+        let _ = writeln!(s, "      {k}: {}", v.0);
+    }
+}
+
+/// Render a metadata map inline (`k=v` per line, aligned under a header column).
+fn write_map_block(
+    s: &mut String,
+    map: Option<&std::collections::BTreeMap<String, String>>,
+    indent: usize,
+) {
+    use std::fmt::Write;
+    match map {
+        Some(m) if !m.is_empty() => {
+            let pad = " ".repeat(indent);
+            for (i, (k, v)) in m.iter().enumerate() {
+                if i == 0 {
+                    let _ = writeln!(s, "{k}={v}");
+                } else {
+                    let _ = writeln!(s, "{pad}{k}={v}");
+                }
+            }
+        }
+        _ => {
+            let _ = writeln!(s, "<none>");
+        }
+    }
+}
+
+/// Best timestamp to sort/age an event by.
+fn event_time(e: &Event) -> String {
+    e.last_timestamp
+        .as_ref()
+        .or(e.first_timestamp.as_ref())
+        .map(|t| t.0.to_string())
+        .unwrap_or_default()
 }

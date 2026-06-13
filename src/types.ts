@@ -41,6 +41,9 @@ export interface TableData {
   rows: string[][];
 }
 
+/** How a connection reaches its cluster: a local kubeconfig or a remote backend. */
+export type ConnMode = "Direct" | "Remote";
+
 export interface KubeconfigEntry {
   id: string;
   path: string;
@@ -49,6 +52,14 @@ export interface KubeconfigEntry {
   last_context: string | null;
   /** Per-connection namespace; null/empty falls back to the global default_namespace. */
   namespace: string | null;
+  /** "Direct" = local kubeconfig (today); "Remote" = a kubefront-backend endpoint. */
+  mode: ConnMode;
+  /** Backend base URL for Remote connections (e.g. https://host/site/connection). */
+  endpoint: string | null;
+  /** Optional PEM CA bundle path to trust for a Remote endpoint (OT internal CA). */
+  ca_path: string | null;
+  /** Skip TLS verification for a Remote endpoint (self-signed proxy). */
+  insecure: boolean;
 }
 
 export type ThemeMode = "Dark" | "Light" | "Custom";
@@ -86,6 +97,19 @@ export interface ColorSchemeInfo {
   key: ColorSchemeKey;
   label: string;
   hex: string;
+}
+
+/** Live health snapshot for one Dashboard cluster card. Null counts = no RBAC. */
+export interface ClusterSummary {
+  reachable: boolean;
+  version: string | null;
+  nodes_total: number | null;
+  nodes_ready: number | null;
+  pods_total: number | null;
+  pods_running: number | null;
+  namespaces: number | null;
+  deployments: number | null;
+  error: string | null;
 }
 
 export interface LogEvent {

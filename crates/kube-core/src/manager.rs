@@ -9,7 +9,7 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ContextInfo {
     pub name: String,
     pub cluster: String,

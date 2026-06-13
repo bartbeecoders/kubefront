@@ -5,6 +5,7 @@ import { api } from "./api";
 import type {
   AppState,
   ColorSchemeInfo,
+  KubeconfigEntry,
   KubeStatus,
   LogEvent,
   NodeRow,
@@ -12,14 +13,19 @@ import type {
   Selection,
   TableData,
 } from "./types";
-import { TABLE_VIEWS, type ViewKey } from "./views";
+import { TABLE_VIEWS, kindLabel, type ViewKey } from "./views";
 
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { DetailPanel } from "./components/DetailPanel";
 import { LogWindow, type LogWindowState } from "./components/LogWindow";
+import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
+import { ConfigMapEditor, type ConfigMapEditRequest } from "./components/ConfigMapEditor";
+import { ConnectionEditor } from "./components/ConnectionEditor";
+import { TextViewModal } from "./components/TextViewModal";
 
+import { DashboardView } from "./views/Dashboard";
 import { PodsView } from "./views/Pods";
 import { NodesView } from "./views/Nodes";
 import { ClustersView } from "./views/Clusters";
@@ -95,7 +101,7 @@ export default function App() {
   const [status, setStatus] = useState<KubeStatus>(EMPTY_STATUS);
   const [connecting, setConnecting] = useState(false);
 
-  const [view, setView] = useState<ViewKey>("pods");
+  const [view, setView] = useState<ViewKey>("dashboard");
   const [pods, setPods] = useState<PodRow[]>([]);
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [tables, setTables] = useState<Record<string, TableData>>({});
@@ -107,6 +113,19 @@ export default function App() {
 
   const [logWins, setLogWins] = useState<LogWindowState[]>([]);
   const nextWinId = useRef(1);
+
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [editConn, setEditConn] = useState<KubeconfigEntry | null>(null);
+  const [editCm, setEditCm] = useState<ConfigMapEditRequest | null>(null);
+  // Bumped to force the DetailPanel to re-fetch its manifest after an edit.
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
+  const [describe, setDescribe] = useState<{
+    namespace: string;
+    name: string;
+    text: string;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
 
   // ---- bootstrap ----
   useEffect(() => {
@@ -282,19 +301,123 @@ export default function App() {
     await loadDefault(null);
   }
 
-  async function switchKubeconfig(path: string) {
+  async function removeKubeconfig(id: string) {
+    setSettings(await api.removeConnection(id));
+  }
+
+  /** Open the edit modal for a connection (Direct or Remote). */
+  function editConnection(id: string) {
+    const entry = settings?.kubeconfigs.find((k) => k.id === id);
+    if (entry) setEditConn(entry);
+  }
+
+  /** Make any connection (Direct or Remote) active and connect to it. */
+  async function selectConnection(id: string) {
     cancelAllLogs();
     setConnecting(true);
     try {
-      setStatus(await api.switchKubeconfig(path));
+      setStatus(await api.selectConnection(id));
       setSettings(await api.getSettings());
     } finally {
       setConnecting(false);
     }
   }
 
-  async function removeKubeconfig(id: string) {
-    setSettings(await api.removeKubeconfig(id));
+  /** Register a remote backend connection (Settings "Add remote"). */
+  async function addRemote(
+    name: string,
+    endpoint: string,
+    caPath: string | null,
+    insecure: boolean,
+  ) {
+    setSettings(await api.addRemoteConnection(name, endpoint, caPath, insecure));
+  }
+
+  /** Dashboard card click: connect to that cluster, then open its details page. */
+  async function openCluster(path: string | null, context: string) {
+    cancelAllLogs();
+    setConnecting(true);
+    try {
+      const st = await api.openCluster(path, context);
+      setStatus(st);
+      setSettings(await api.getSettings());
+      if (st.connected) {
+        setSelected(null);
+        setView("monitoring");
+      }
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  // ---- resource actions (delete / restart, with confirmation) ----
+  function fullName(namespace: string | null, name: string) {
+    return namespace ? `${namespace}/${name}` : name;
+  }
+
+  function clearIfSelected(kind: string, namespace: string | null, name: string) {
+    setSelected((sel) =>
+      sel && sel.kind === kind && sel.name === name && (sel.namespace ?? null) === namespace
+        ? null
+        : sel,
+    );
+  }
+
+  function requestDelete(kind: string, namespace: string | null, name: string) {
+    setConfirm({
+      title: `Delete ${kindLabel(kind)}`,
+      message: `Delete ${kindLabel(kind)} "${fullName(namespace, name)}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+      action: async () => {
+        await api.deleteResource(kind, namespace, name);
+        clearIfSelected(kind, namespace, name);
+        refreshRef.current();
+      },
+    });
+  }
+
+  function requestRestart(kind: string, namespace: string | null, name: string) {
+    const isPod = kind === "pods";
+    setConfirm({
+      title: `Restart ${kindLabel(kind)}`,
+      message: isPod
+        ? `Restart pod "${fullName(namespace, name)}"? The pod is deleted and its controller recreates it — a standalone pod will NOT come back.`
+        : `Restart ${kindLabel(kind)} "${fullName(namespace, name)}"? A rolling restart replaces all of its pods.`,
+      confirmLabel: "Restart",
+      action: async () => {
+        await api.restartResource(kind, namespace, name);
+        if (isPod) clearIfSelected(kind, namespace, name);
+        refreshRef.current();
+      },
+    });
+  }
+
+  /** Open the ConfigMap editor, seeding it with the live `data` map. */
+  async function requestEditConfigmap(
+    kind: string,
+    namespace: string | null,
+    name: string,
+  ) {
+    if (kind !== "configmaps" || !namespace) return;
+    try {
+      const detail = await api.getResource(kind, namespace, name);
+      const data = (JSON.parse(detail.manifest)?.data ?? {}) as Record<string, string>;
+      setEditCm({ namespace, name, data });
+    } catch (e) {
+      setDataError(String(e));
+    }
+  }
+
+  /** Fetch and show a kubectl-describe-style report for a pod. */
+  async function openDescribe(namespace: string, name: string) {
+    setDescribe({ namespace, name, text: "", loading: true, error: null });
+    try {
+      const text = await api.describePod(namespace, name);
+      setDescribe({ namespace, name, text, loading: false, error: null });
+    } catch (e) {
+      setDescribe({ namespace, name, text: "", loading: false, error: String(e) });
+    }
   }
 
   // ---- logs ----
@@ -420,7 +543,18 @@ export default function App() {
 
         <main className="content">{renderView()}</main>
 
-        {showDetail && <DetailPanel selected={selected} pods={pods} onOpenLogs={openLogs} />}
+        {showDetail && (
+          <DetailPanel
+            selected={selected}
+            pods={pods}
+            reloadKey={detailReloadKey}
+            onOpenLogs={openLogs}
+            onDelete={requestDelete}
+            onRestart={requestRestart}
+            onEdit={requestEditConfigmap}
+            onDescribe={openDescribe}
+          />
+        )}
       </div>
 
       <StatusBar status={status} settings={settings} podCount={pods.length} />
@@ -435,11 +569,52 @@ export default function App() {
           onChangeContainer={changeContainer}
         />
       ))}
+
+      {confirm && <ConfirmDialog req={confirm} onClose={() => setConfirm(null)} />}
+
+      {editConn && (
+        <ConnectionEditor
+          entry={editConn}
+          onClose={() => setEditConn(null)}
+          onSaved={async () => setSettings(await api.getSettings())}
+        />
+      )}
+
+      {editCm && (
+        <ConfigMapEditor
+          req={editCm}
+          onClose={() => setEditCm(null)}
+          onSaved={() => {
+            setDetailReloadKey((k) => k + 1);
+            refreshRef.current();
+          }}
+        />
+      )}
+
+      {describe && (
+        <TextViewModal
+          title="Describe Pod"
+          subtitle={`${describe.namespace}/${describe.name}`}
+          text={describe.text}
+          loading={describe.loading}
+          error={describe.error}
+          onClose={() => setDescribe(null)}
+        />
+      )}
     </div>
   );
 
   function renderView() {
     switch (view) {
+      case "dashboard":
+        return (
+          <DashboardView
+            settings={settings!}
+            status={status}
+            onOpen={openCluster}
+            onSelectRemote={selectConnection}
+          />
+        );
       case "clusters":
         return <ClustersView status={status} onConnect={selectContext} />;
       case "nodes":
@@ -455,6 +630,8 @@ export default function App() {
             selected={selected}
             onSelect={setSelected}
             onOpenLogs={openLogs}
+            onDelete={requestDelete}
+            onRestart={requestRestart}
           />
         );
       case "monitoring":
@@ -476,7 +653,9 @@ export default function App() {
               if (p) patchSettings({ kubeconfig_path: p });
             }}
             onAddKubeconfig={loadFromFile}
-            onSwitch={switchKubeconfig}
+            onSelect={selectConnection}
+            onAddRemote={addRemote}
+            onEdit={editConnection}
             onRemove={removeKubeconfig}
             onClose={() => selectView("pods")}
           />
@@ -484,7 +663,16 @@ export default function App() {
       default: {
         const def = TABLE_VIEWS[view];
         if (def)
-          return <TableView def={def} tables={tables} selected={selected} onSelect={setSelected} />;
+          return (
+            <TableView
+              def={def}
+              tables={tables}
+              selected={selected}
+              onSelect={setSelected}
+              onDelete={requestDelete}
+              onRestart={requestRestart}
+            />
+          );
         return <div className="empty">Unknown view.</div>;
       }
     }

@@ -23,40 +23,45 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 
-# Kubernetes
-# TLS backend: OpenSSL (not rustls). rustls/webpki accept only X.509 v3 certs and
-# reject the v1 client certs that some k3s / older clusters issue with
-# `UnsupportedCertVersion`; OpenSSL accepts them, matching kubectl's behaviour.
-kube = { version = "3.1", default-features = false, features = ["client", "openssl-tls", "runtime"] }
-k8s-openapi = { version = "0.27", features = ["latest"] }
+# Shared Kubernetes logic + DTOs (LocalKube, projections, log_stream, errors).
+kubefront-core = { path = "../crates/kube-core" }
+
+# Desktop → backend transport (RemoteKube). native-tls-vendored reuses the same
+# vendored OpenSSL as kube, keeping ONE TLS stack in the binary.
+reqwest = { workspace = true }
+
+# Kubernetes — still used directly by the Direct-mode `cluster_summary`/`connect`
+# commands (short-lived clients + kubeconfig types). TLS is OpenSSL (see below).
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
 
 # Async runtime & channels
-tokio = { version = "1.45", features = ["rt-multi-thread", "time", "sync", "macros"] }
+tokio = { workspace = true }
 
 # Time & formatting
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # Serialization (IPC + persistence)
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
 
 # Utils
-home = "0.5"
-anyhow = "1.0"
-thiserror = "2.0"
-futures-util = { version = "0.3", features = ["std"] }
-directories = "5.0"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+futures-util = { workspace = true }
+async-stream = { workspace = true }
+directories = { workspace = true }
 
 # Force a vendored (statically-linked) OpenSSL so release installers are
 # self-contained — no system libssl / OpenSSL DLL to ship. kube's `openssl-tls`
 # pulls openssl in transitively; declaring it here enables the `vendored` feature.
 # Build prereqs: a C compiler + Perl everywhere, plus NASM on Windows.
-openssl = { version = "0.10", features = ["vendored"] }
+openssl = { workspace = true }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

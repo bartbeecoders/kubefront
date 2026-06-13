@@ -72,13 +72,26 @@ impl ColorScheme {
     ];
 }
 
-/// Represents one registered kubeconfig with user-friendly metadata.
+/// How a connection reaches its cluster.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ConnMode {
+    /// Local `kube::Client` built from a kubeconfig (today's behavior, port 6443).
+    #[default]
+    Direct,
+    /// HTTP to a `kubefront-backend` behind a reverse proxy (port 443).
+    Remote,
+}
+
+/// Represents one registered connection — either a local kubeconfig (Direct) or a
+/// remote backend endpoint (Remote). Old settings.json files deserialize as Direct
+/// because every new field has a `#[serde(default)]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KubeconfigEntry {
-    /// Stable identifier for this entry (currently the absolute path, but can evolve).
+    /// Stable identifier (the kubeconfig path for Direct, the endpoint for Remote).
     pub id: String,
 
-    /// Absolute path to the kubeconfig file.
+    /// Absolute path to the kubeconfig file (Direct). For Remote this mirrors the
+    /// endpoint and is not a real file path.
     pub path: String,
 
     /// Friendly name shown in the UI (e.g. "Production K3S", "Staging EKS").
@@ -88,18 +101,37 @@ pub struct KubeconfigEntry {
     #[serde(default)]
     pub description: Option<String>,
 
-    /// Last context the user used in this specific kubeconfig.
+    /// Last context the user used in this specific kubeconfig (Direct only).
     #[serde(default)]
     pub last_context: Option<String>,
 
-    /// Namespace to scope resource lists to while this kubeconfig is active.
+    /// Namespace to scope resource lists to while this connection is active.
     /// None/empty falls back to the global `default_namespace`. Seeded from the
-    /// kubeconfig context's own `namespace` field on first successful connect.
+    /// kubeconfig context (Direct) or the backend's reported namespace (Remote).
     #[serde(default)]
     pub namespace: Option<String>,
+
+    /// Direct (local kubeconfig) or Remote (backend endpoint).
+    #[serde(default)]
+    pub mode: ConnMode,
+
+    /// Base URL of the backend connection (Remote only), e.g.
+    /// `https://host/k3s-server1/connection1`.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    /// Optional path to a PEM CA bundle to trust for the Remote endpoint (for OT
+    /// reverse proxies with an internal CA).
+    #[serde(default)]
+    pub ca_path: Option<String>,
+
+    /// Skip TLS verification for the Remote endpoint (self-signed proxy). Unsafe.
+    #[serde(default)]
+    pub insecure: bool,
 }
 
 impl KubeconfigEntry {
+    /// A Direct (local kubeconfig) entry.
     pub fn new(path: impl Into<String>) -> Self {
         let path = path.into();
         let name = std::path::Path::new(&path)
@@ -114,6 +146,32 @@ impl KubeconfigEntry {
             description: None,
             last_context: None,
             namespace: None,
+            mode: ConnMode::Direct,
+            endpoint: None,
+            ca_path: None,
+            insecure: false,
+        }
+    }
+
+    /// A Remote (backend endpoint) entry. Identified by its endpoint URL.
+    pub fn new_remote(
+        name: impl Into<String>,
+        endpoint: impl Into<String>,
+        ca_path: Option<String>,
+        insecure: bool,
+    ) -> Self {
+        let endpoint = endpoint.into();
+        Self {
+            id: endpoint.clone(),
+            path: endpoint.clone(),
+            name: name.into(),
+            description: None,
+            last_context: None,
+            namespace: None,
+            mode: ConnMode::Remote,
+            endpoint: Some(endpoint),
+            ca_path,
+            insecure,
         }
     }
 }
@@ -324,7 +382,70 @@ impl AppState {
         id
     }
 
-    /// Remove a kubeconfig by ID.
+    /// Register a remote backend connection (or update its metadata if the
+    /// endpoint already exists). Returns the entry id.
+    pub fn add_remote(
+        &mut self,
+        name: String,
+        endpoint: String,
+        ca_path: Option<String>,
+        insecure: bool,
+    ) -> String {
+        let endpoint = endpoint.trim().trim_end_matches('/').to_string();
+        if let Some(existing) = self
+            .kubeconfigs
+            .iter_mut()
+            .find(|k| k.endpoint.as_deref() == Some(endpoint.as_str()))
+        {
+            existing.name = name;
+            existing.ca_path = ca_path;
+            existing.insecure = insecure;
+            return existing.id.clone();
+        }
+        let entry = KubeconfigEntry::new_remote(name, endpoint, ca_path, insecure);
+        let id = entry.id.clone();
+        self.kubeconfigs.push(entry);
+        id
+    }
+
+    /// Update an existing connection's editable fields in place, keeping its `id`
+    /// (and thus `active_kubeconfig_id`) stable. `endpoint`/`ca_path`/`insecure`
+    /// only apply to Remote entries; for Direct entries the path is immutable
+    /// (pick a different file via "Add kubeconfig" instead). Returns false if no
+    /// entry with `id` exists.
+    pub fn update_connection(
+        &mut self,
+        id: &str,
+        name: String,
+        description: Option<String>,
+        namespace: Option<String>,
+        endpoint: Option<String>,
+        ca_path: Option<String>,
+        insecure: bool,
+    ) -> bool {
+        let Some(entry) = self.kubeconfigs.iter_mut().find(|k| k.id == id) else {
+            return false;
+        };
+        entry.name = name;
+        entry.description = description;
+        entry.namespace = namespace;
+        if entry.mode == ConnMode::Remote {
+            if let Some(ep) = endpoint {
+                let ep = ep.trim().trim_end_matches('/').to_string();
+                if !ep.is_empty() {
+                    entry.endpoint = Some(ep.clone());
+                    // Mirror into `path` so the list's "Path / Endpoint" column and
+                    // any path-based display stay in sync. `id` is untouched.
+                    entry.path = ep;
+                }
+            }
+            entry.ca_path = ca_path;
+            entry.insecure = insecure;
+        }
+        true
+    }
+
+    /// Remove a connection (Direct or Remote) by ID.
     pub fn unregister_kubeconfig_by_id(&mut self, id: &str) {
         self.kubeconfigs.retain(|k| k.id != id);
 

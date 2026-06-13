@@ -81,7 +81,7 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: .
 
       - name: Install frontend dependencies
         run: npm ci
@@ -155,6 +155,26 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      # --- Headless backend server binary (kubefront-backend) ---
+      - name: Build kubefront-backend binary
+        run: cargo build --release -p kubefront-backend
+
+      - name: Upload kubefront-backend binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/kubefront-backend.exe kubefront-backend-windows-x86_64.exe
+            gh release upload "$RELEASE_TAG" kubefront-backend-windows-x86_64.exe --clobber
+          else
+            cp target/release/kubefront-backend kubefront-backend-linux-x86_64
+            gh release upload "$RELEASE_TAG" \
+              kubefront-backend-linux-x86_64 \
+              crates/kubefront-backend/backend.toml.example --clobber
+          fi
+
       # --- Windows: attach the public signing certificate for optional self-trust ---
       - name: Upload Windows signing certificate
         if: runner.os == 'Windows'
@@ -187,9 +207,9 @@ jobs:
           shopt -s nullglob
           sigs=()
           for f in \
-            src-tauri/target/release/bundle/deb/*.deb \
-            src-tauri/target/release/bundle/appimage/*.AppImage \
-            src-tauri/target/release/bundle/rpm/*.rpm; do
+            target/release/bundle/deb/*.deb \
+            target/release/bundle/appimage/*.AppImage \
+            target/release/bundle/rpm/*.rpm; do
             echo "Signing $f"
             gpg --batch --yes --armor --detach-sign --output "${f}.asc" "$f"
             sigs+=( "${f}.asc" )

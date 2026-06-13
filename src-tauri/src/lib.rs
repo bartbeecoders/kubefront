@@ -5,11 +5,12 @@
 //! rendered in the native WebView. TLS is handled by OpenSSL (see Cargo.toml).
 
 mod commands;
-mod k8s;
+mod conn;
+mod remote;
 mod state;
 
 use commands::Backend;
-use k8s::manager::KubeConfigManager;
+use kubefront_core::KubeConfigManager;
 use state::AppState;
 use tokio::sync::Mutex;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -159,12 +160,25 @@ pub fn run() {
             commands::get_status,
             commands::connect,
             commands::switch_kubeconfig,
+            commands::open_cluster,
+            commands::kubeconfig_contexts,
+            commands::cluster_summary,
             commands::list_pods,
             commands::list_nodes,
             commands::list_resource,
             commands::get_resource,
+            commands::delete_resource,
+            commands::restart_resource,
+            commands::update_configmap,
+            commands::describe_pod,
             commands::stream_logs,
             commands::stop_logs,
+            commands::add_remote_connection,
+            commands::update_connection,
+            commands::remove_connection,
+            commands::test_remote_connection,
+            commands::remote_summary,
+            commands::select_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running KubeFront");

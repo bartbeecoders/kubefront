@@ -1,0 +1,35 @@
+[package]
+name = "kubefront-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Headless REST server that fronts multiple Kubernetes clusters for KubeFront, served behind a reverse proxy."
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "kubefront-backend"
+path = "src/main.rs"
+
+[dependencies]
+kubefront-core = { path = "../kube-core" }
+
+# kube is used directly to read the per-connection kubeconfig + build options.
+kube = { workspace = true }
+
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures-util = { workspace = true }
+
+# Inherit the same vendored OpenSSL the kube client links against.
+openssl = { workspace = true }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
 import type { AppState, ColorSchemeInfo, ThemeMode } from "../types";
 
@@ -11,7 +12,12 @@ interface Props {
   onReset: () => void;
   onBrowse: () => void;
   onAddKubeconfig: () => void;
-  onSwitch: (path: string) => void;
+  /** Make a connection (Direct or Remote) active and connect to it. */
+  onSelect: (id: string) => void;
+  /** Register a remote backend connection. */
+  onAddRemote: (name: string, endpoint: string, caPath: string | null, insecure: boolean) => void;
+  /** Open the editor for an existing connection. */
+  onEdit: (id: string) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
 }
@@ -37,6 +43,52 @@ export function SettingsView(props: Props) {
     api.logPath().then(setLogPath).catch(() => {});
     getVersion().then(setVersion).catch(() => {});
   }, []);
+
+  // Remote-connection add form.
+  const [rName, setRName] = useState("");
+  const [rEndpoint, setREndpoint] = useState("");
+  const [rCa, setRCa] = useState("");
+  const [rInsecure, setRInsecure] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  async function browseCa() {
+    const res = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        { name: "Certificate", extensions: ["pem", "crt", "cer", "ca"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    if (typeof res === "string") setRCa(res);
+  }
+
+  async function testRemote() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const st = await api.testRemoteConnection(rEndpoint.trim(), rCa.trim() || null, rInsecure);
+      setTestResult(
+        st.connected
+          ? `✓ Reachable${st.cluster_version ? ` — ${st.cluster_version}` : ""}`
+          : `✗ ${st.error ?? "unreachable"}`,
+      );
+    } catch (e) {
+      setTestResult(`✗ ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function submitRemote() {
+    props.onAddRemote(rName.trim(), rEndpoint.trim(), rCa.trim() || null, rInsecure);
+    setRName("");
+    setREndpoint("");
+    setRCa("");
+    setRInsecure(false);
+    setTestResult(null);
+  }
 
   const currentAccentHex = settings.custom_accent
     ? rgbToHex(settings.custom_accent)
@@ -113,9 +165,10 @@ export function SettingsView(props: Props) {
               <thead>
                 <tr>
                   <th className="name">Name</th>
+                  <th>Type</th>
                   <th>Description</th>
                   <th>Namespace</th>
-                  <th>Path</th>
+                  <th>Path / Endpoint</th>
                   <th></th>
                 </tr>
               </thead>
@@ -131,6 +184,11 @@ export function SettingsView(props: Props) {
                           value={e.name}
                           onChange={(ev) => updateEntry(e.id, { name: ev.target.value })}
                         />
+                      </td>
+                      <td>
+                        <span className={`pill ${e.mode === "Remote" ? "pill-remote" : "pill-direct"}`}>
+                          {e.mode === "Remote" ? "Remote" : "Direct"}
+                        </span>
                       </td>
                       <td>
                         <input
@@ -165,10 +223,13 @@ export function SettingsView(props: Props) {
                               Active
                             </button>
                           ) : (
-                            <button className="btn sm" onClick={() => props.onSwitch(e.path)}>
-                              Switch
+                            <button className="btn sm" onClick={() => props.onSelect(e.id)}>
+                              {e.mode === "Remote" ? "Connect" : "Switch"}
                             </button>
                           )}
+                          <button className="btn sm" onClick={() => props.onEdit(e.id)}>
+                            Edit
+                          </button>
                           <button className="btn sm ghost" onClick={() => props.onRemove(e.id)}>
                             ✕
                           </button>
@@ -181,6 +242,70 @@ export function SettingsView(props: Props) {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Remote connections */}
+      <div className="section-title">Remote Connections (via backend)</div>
+      <div className="desc" style={{ marginBottom: 10 }}>
+        Connect to clusters reachable only through a reverse proxy (port 443) by adding a
+        kubefront-backend endpoint, e.g.{" "}
+        <span className="mono">https://server/k3s-server1/connection1</span>. Added connections
+        appear in the list above (type "Remote") and on the Dashboard.
+      </div>
+      <div className="field">
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <input
+            className="input"
+            placeholder="Name (e.g. Site 1 Prod)"
+            style={{ width: 180 }}
+            value={rName}
+            onChange={(e) => setRName(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="https://server/site/connection"
+            style={{ flex: 1, minWidth: 260 }}
+            value={rEndpoint}
+            onChange={(e) => setREndpoint(e.target.value)}
+          />
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <input
+            className="input"
+            placeholder="CA certificate path (optional)"
+            style={{ flex: 1, minWidth: 220 }}
+            value={rCa}
+            onChange={(e) => setRCa(e.target.value)}
+          />
+          <button className="btn" onClick={browseCa}>
+            Browse…
+          </button>
+          <label
+            className="row"
+            style={{ gap: 4, alignItems: "center" }}
+            title="Skip TLS verification — only for trusted networks with a self-signed proxy"
+          >
+            <input
+              type="checkbox"
+              checked={rInsecure}
+              onChange={(e) => setRInsecure(e.target.checked)}
+            />
+            Insecure
+          </label>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center" }}>
+          <button className="btn" disabled={!rEndpoint.trim() || testing} onClick={testRemote}>
+            {testing ? "Testing…" : "Test"}
+          </button>
+          <button
+            className="btn primary"
+            disabled={!rName.trim() || !rEndpoint.trim()}
+            onClick={submitRemote}
+          >
+            ＋ Add remote
+          </button>
+          {testResult && <span className="desc">{testResult}</span>}
+        </div>
       </div>
 
       {/* Theme */}

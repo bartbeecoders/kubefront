@@ -2,19 +2,24 @@
 
 This file exists so AI agents (and humans) can work effectively on KubeFront without breaking architectural invariants.
 
-> **Architecture note:** KubeFront is a **Tauri v2** desktop app. The UI is a
-> **React + TypeScript** front end (`src/`) rendered in the OS WebView; the
-> backend is **Rust + kube-rs** (`src-tauri/`). The two communicate only through
-> Tauri IPC (typed `invoke` commands + `Channel` streams). It is no longer an
-> egui app.
+> **Architecture note:** KubeFront is a Cargo **workspace** of three crates:
+> **`crates/kube-core`** holds all Kubernetes logic + serde DTOs (`LocalKube`,
+> projections, `log_stream`) and is shared by both the desktop and the server;
+> **`crates/kubefront-backend`** is a headless **axum** REST server that fronts
+> multiple clusters behind a reverse proxy; **`src-tauri`** is the **Tauri v2**
+> desktop app (a **React + TypeScript** front end in `src/` rendered in the OS
+> WebView). The desktop talks to React only through Tauri IPC (typed `invoke`
+> commands + `Channel` streams); each command dispatches to a local `kube::Client`
+> (Direct mode) or an HTTP `RemoteKube` → the backend (Remote mode). It is no
+> longer an egui app.
 
 ## Core Principles
 
 1. **Clear front/back split** — UI lives in `src/` (React/TS). All Kubernetes and OS work lives in `src-tauri/`. The only contract between them is the command surface in `src-tauri/src/commands.rs` and its TypeScript mirror in `src/api.ts` + `src/types.ts`. Keep those in sync.
 2. **Never block — everything async** — All Kubernetes work (client creation, list, logs) runs on Tauri's Tokio runtime inside `#[tauri::command] async fn`s. The frontend stays responsive; it *pulls* resource lists on a timer and *receives* log lines pushed over a `Channel`.
-3. **Kube logic lives in `k8s/`** — `src-tauri/src/k8s/` (manager, store) owns every `kube::Client`, `Kubeconfig`, and streaming operation. `commands.rs` orchestrates; React never sees raw k8s objects, only small serializable projections (`PodRow`, `NodeRow`, `TableData`, …).
-4. **One active context** — Multiple contexts/kubeconfigs are managed, but only one live `kube::Client` at a time, held in the managed `Backend` state behind a Tokio `Mutex`.
-5. **K3S is first-class but not special** — The "this looks like K3S" heuristic lives in ONE place (`k8s/manager.rs::detect_k3s`). Everything else treats every cluster identically.
+3. **Kube logic lives in `kube-core`** — `crates/kube-core` (manager, store, `LocalKube`, `log_stream`, DTOs) owns every `kube::Client`, `Kubeconfig`, and streaming operation. The desktop `commands.rs` and the backend handlers only orchestrate; neither React nor HTTP ever sees raw k8s objects, only small serializable projections (`PodRow`, `NodeRow`, `TableData`, …). Do NOT reintroduce kube-rs calls in `src-tauri` (except the short-lived Dashboard probe) or duplicate them in the backend.
+4. **One active connection (desktop) — many (backend)** — The DESKTOP holds exactly one live connection at a time (`Backend.active: Option<Active>` = Local or Remote, behind a Tokio `Mutex`). The BACKEND server is multi-connection: a `ConnectionPool` keyed by `backend.toml` id, each lazily built. The "one active" invariant is a desktop concern only.
+5. **K3S is first-class but not special** — The "this looks like K3S" heuristic lives in ONE place (`kube-core::manager::detect_k3s`). Everything else treats every cluster identically.
 6. **Small, fast, local** — No bundled Chromium (OS WebView). Ring buffers for logs (cap ~5000 lines). Pull only what the active view needs.
 
 ## IPC Pattern (MANDATORY)
@@ -60,11 +65,13 @@ listPods: (namespace: string | null) => invoke<PodRow[]>("list_pods", { namespac
 
 - Before any PR-like push:
   ```bash
-  npm run build                                                    # tsc + vite
-  cargo fmt   --manifest-path src-tauri/Cargo.toml -- --check
-  cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+  npm run build                                       # tsc + vite (must run first; src-tauri embeds dist/)
+  cargo fmt --all -- --check                          # whole workspace
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo test -p kube-core                             # DTO round-trips + error-string golden tests
   ```
-- `dist/` must exist before `cargo clippy`/`build` (the crate embeds it). Run `npm run build` first.
+- `dist/` must exist before clippy/building `src-tauri` (it embeds it). `kube-core` and `kubefront-backend` build without `dist/`.
+- **DTO evolution:** the desktop (`RemoteKube`) and a possibly-older backend exchange `kube-core` DTOs as JSON. Add new DTO fields as `#[serde(default)]`; never remove/rename a field without a version bump. The error STRINGS in `CoreError` are matched by the frontend — keep the golden tests in `kube-core/src/error.rs` green.
 - Manual test on real clusters (k3d, native k3s, rancher-desktop, remote via kubeconfig) for resource views and logs.
 
 ## What NOT to Do
