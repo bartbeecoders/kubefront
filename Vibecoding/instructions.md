@@ -61,3 +61,14 @@ In key places add a copy text feature to copy the text to the clipboard.
 
 
 Add the ability to see CRDS
+
+
+### World view
+
+Add to each connection a location (city, country). 
+On the dashboard show a world map and show the connections on this map based on the location.
+
+Add also some other parameters to the connection:
+- cluster type (K3S, K8S, AKS)
+- Manufacturing plant
+- Environment (dev, val, prod)

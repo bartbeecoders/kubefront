@@ -169,7 +169,7 @@ export function SettingsView(props: Props) {
                   <th>Description</th>
                   <th>Namespace</th>
                   <th>Path / Endpoint</th>
-                  <th></th>
+                  <th className="actions"></th>
                 </tr>
               </thead>
               <tbody>
@@ -216,8 +216,8 @@ export function SettingsView(props: Props) {
                       <td className="mono" title={e.path}>
                         {e.path.length > 30 ? "…" + e.path.slice(-29) : e.path}
                       </td>
-                      <td>
-                        <div className="row">
+                      <td className="actions">
+                        <span className="row-actions">
                           {active ? (
                             <button className="btn sm" disabled>
                               Active
@@ -233,7 +233,7 @@ export function SettingsView(props: Props) {
                           <button className="btn sm ghost" onClick={() => props.onRemove(e.id)}>
                             ✕
                           </button>
-                        </div>
+                        </span>
                       </td>
                     </tr>
                   );

@@ -6,6 +6,7 @@ import type {
   AppState,
   ClusterSummary,
   ColorSchemeInfo,
+  ConnectionPatch,
   ContextInfo,
   KubeStatus,
   LogEvent,
@@ -32,25 +33,9 @@ export const api = {
     insecure: boolean,
   ) => invoke<AppState>("add_remote_connection", { name, endpoint, caPath, insecure }),
   /** Edit an existing connection (Direct or Remote) in place; returns updated settings.
-   *  endpoint/caPath/insecure are ignored for Direct connections. */
-  updateConnection: (
-    id: string,
-    name: string,
-    description: string | null,
-    namespace: string | null,
-    endpoint: string | null,
-    caPath: string | null,
-    insecure: boolean,
-  ) =>
-    invoke<AppState>("update_connection", {
-      id,
-      name,
-      description,
-      namespace,
-      endpoint,
-      caPath,
-      insecure,
-    }),
+   *  endpoint/ca_path/insecure in the patch are ignored for Direct connections. */
+  updateConnection: (id: string, patch: ConnectionPatch) =>
+    invoke<AppState>("update_connection", { id, patch }),
   /** Remove any connection (Direct or Remote) by id; returns updated settings. */
   removeConnection: (id: string) => invoke<AppState>("remove_connection", { id }),
   /** Probe a remote endpoint without making it active (Settings "Test" button). */

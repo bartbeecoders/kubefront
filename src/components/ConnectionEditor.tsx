@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
-import type { KubeconfigEntry } from "../types";
+import type { ClusterType, Environment, KubeconfigEntry } from "../types";
+
+const CLUSTER_TYPES: ClusterType[] = ["K3s", "K8s", "Aks"];
+const ENVIRONMENTS: Environment[] = ["Dev", "Val", "Prod"];
+
+/** Parse a coordinate text field → number | null (empty/invalid = null). */
+function parseCoord(s: string): number | null {
+  const t = s.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 
 interface Props {
   /** The connection being edited (seeds the form). */
@@ -23,6 +34,15 @@ export function ConnectionEditor({ entry, onClose, onSaved }: Props) {
   const [endpoint, setEndpoint] = useState(entry.endpoint ?? "");
   const [caPath, setCaPath] = useState(entry.ca_path ?? "");
   const [insecure, setInsecure] = useState(entry.insecure);
+
+  // World-view / inventory metadata.
+  const [city, setCity] = useState(entry.city ?? "");
+  const [country, setCountry] = useState(entry.country ?? "");
+  const [latitude, setLatitude] = useState(entry.latitude != null ? String(entry.latitude) : "");
+  const [longitude, setLongitude] = useState(entry.longitude != null ? String(entry.longitude) : "");
+  const [clusterType, setClusterType] = useState<ClusterType | "">(entry.cluster_type ?? "");
+  const [plant, setPlant] = useState(entry.plant ?? "");
+  const [environment, setEnvironment] = useState<Environment | "">(entry.environment ?? "");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,15 +98,21 @@ export function ConnectionEditor({ entry, onClose, onSaved }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await api.updateConnection(
-        entry.id,
-        name.trim(),
-        description.trim() || null,
-        namespace.trim() || null,
-        isRemote ? endpoint.trim() : null,
-        isRemote ? caPath.trim() || null : null,
-        isRemote ? insecure : false,
-      );
+      await api.updateConnection(entry.id, {
+        name: name.trim(),
+        description: description.trim() || null,
+        namespace: namespace.trim() || null,
+        endpoint: isRemote ? endpoint.trim() : null,
+        ca_path: isRemote ? caPath.trim() || null : null,
+        insecure: isRemote ? insecure : false,
+        city: city.trim() || null,
+        country: country.trim() || null,
+        latitude: parseCoord(latitude),
+        longitude: parseCoord(longitude),
+        cluster_type: clusterType || null,
+        plant: plant.trim() || null,
+        environment: environment || null,
+      });
       onSaved();
       onClose();
     } catch (e) {
@@ -97,9 +123,15 @@ export function ConnectionEditor({ entry, onClose, onSaved }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={() => !busy && onClose()}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()} style={{ minWidth: 460 }}>
-        <div className="modal-title">Edit {isRemote ? "Remote" : "Direct"} Connection</div>
+      <div className="modal conn-editor" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-title">
+          Edit {isRemote ? "Remote" : "Direct"} Connection
+          <span className="conn-editor-sub" title={entry.name}>
+            {entry.name}
+          </span>
+        </div>
 
+        <div className="conn-editor-body">
         <div className="field">
           <label>Name</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
@@ -181,6 +213,100 @@ export function ConnectionEditor({ entry, onClose, onSaved }: Props) {
             </div>
           </div>
         )}
+
+        <div className="section-title" style={{ marginTop: 14 }}>
+          Location & inventory
+        </div>
+        <div className="desc" style={{ marginBottom: 8 }}>
+          Used for the dashboard world map and filtering. The map places this cluster from the
+          country (or precise latitude/longitude if given).
+        </div>
+
+        <div className="row" style={{ gap: 10 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>City</label>
+            <input
+              className="input"
+              placeholder="e.g. Visp"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Country</label>
+            <input
+              className="input"
+              placeholder="e.g. Switzerland"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: 10 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Latitude</label>
+            <input
+              className="input"
+              placeholder="optional — overrides country"
+              value={latitude}
+              onChange={(e) => setLatitude(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Longitude</label>
+            <input
+              className="input"
+              placeholder="optional"
+              value={longitude}
+              onChange={(e) => setLongitude(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: 10 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Cluster type</label>
+            <select
+              className="input"
+              value={clusterType}
+              onChange={(e) => setClusterType(e.target.value as ClusterType | "")}
+            >
+              <option value="">—</option>
+              {CLUSTER_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t === "K3s" ? "K3S" : t === "K8s" ? "K8S" : "AKS"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Environment</label>
+            <select
+              className="input"
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value as Environment | "")}
+            >
+              <option value="">—</option>
+              {ENVIRONMENTS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Manufacturing plant</label>
+          <input
+            className="input"
+            placeholder="optional…"
+            value={plant}
+            onChange={(e) => setPlant(e.target.value)}
+          />
+        </div>
+        </div>
 
         {error && <div className="modal-error">⚠ {error}</div>}
 

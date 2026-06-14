@@ -376,7 +376,7 @@ textarea {
 .table-wrap {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow: auto; /* allow horizontal scroll for wide tables (e.g. connections list with buttons) instead of clipping the right side */
 }
 table.kt {
   width: 100%;
@@ -757,6 +757,37 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
   margin-top: 16px;
 }
 
+/* === Connection editor: bounded height so long forms scroll instead of
+   clipping the dialog (title stays on top, actions pinned at the bottom). === */
+.modal.conn-editor {
+  width: 520px;
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+.conn-editor-sub {
+  margin-left: 8px;
+  font-weight: 500;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.conn-editor-body {
+  flex: 1 1 auto;
+  min-height: 0; /* allow the body to shrink below content so overflow scrolls */
+  overflow-y: auto;
+  margin-top: 8px;
+  /* keep a little room so input focus rings aren't clipped by the scrollbar */
+  padding-right: 6px;
+  margin-right: -6px;
+}
+.modal.conn-editor .modal-title {
+  flex: 0 0 auto;
+}
+.modal.conn-editor .modal-actions {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+}
+
 /* === Text view modal (describe output) === */
 .modal.text-view {
   width: 820px;
@@ -943,4 +974,119 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-faint);
+}
+
+/* ===== Connection inventory badges ===== */
+.pill-type {
+  color: var(--text-dim);
+  border-color: var(--border);
+  margin-left: 6px;
+}
+.pill-env {
+  margin-left: 6px;
+  color: #0b1220;
+  border: none;
+}
+.pill-env.env-dev {
+  background: #38bdf8;
+}
+.pill-env.env-val {
+  background: #fbbf24;
+}
+.pill-env.env-prod {
+  background: #a78bfa;
+}
+
+/* ===== Dashboard world map ===== */
+.worldmap-section {
+  margin-bottom: 18px;
+}
+.worldmap-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.worldmap-head h2 {
+  font-size: 1.02rem;
+  font-weight: 650;
+  margin: 0;
+}
+.worldmap {
+  position: relative;
+  background: var(--map-ocean, var(--panel-2));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 6px 8px 2px;
+  overflow: hidden;
+}
+.worldmap svg {
+  display: block;
+}
+.worldmap-tip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 150px;
+  max-width: 260px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.worldmap-tip-title {
+  font-weight: 650;
+  margin-bottom: 2px;
+}
+.worldmap-tip-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+.worldmap-tip-meta .pill {
+  margin: 0;
+}
+.worldmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 4px 4px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.worldmap-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.worldmap-legend .lg.sep {
+  border-left: 1px solid var(--border);
+  padding-left: 14px;
+}
+.worldmap-legend .lg i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.worldmap-legend .lg i.ring {
+  background: transparent;
+  border: 2.5px solid;
+}
+
+/* Map land/ocean tones, theme-aware. */
+:root {
+  --map-ocean: #11151d;
+  --map-land: #2a3344;
+  --map-stroke: #3a455c;
+}
+:root[data-theme="light"] {
+  --map-ocean: #eaf0f6;
+  --map-land: #c7d2e0;
+  --map-stroke: #aab7c8;
 }

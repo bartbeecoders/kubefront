@@ -44,6 +44,12 @@ export interface TableData {
 /** How a connection reaches its cluster: a local kubeconfig or a remote backend. */
 export type ConnMode = "Direct" | "Remote";
 
+/** Orchestrator type for a connection (user-declared). */
+export type ClusterType = "K3s" | "K8s" | "Aks";
+
+/** Deployment environment a connection targets. */
+export type Environment = "Dev" | "Val" | "Prod";
+
 export interface KubeconfigEntry {
   id: string;
   path: string;
@@ -60,6 +66,39 @@ export interface KubeconfigEntry {
   ca_path: string | null;
   /** Skip TLS verification for a Remote endpoint (self-signed proxy). */
   insecure: boolean;
+  // --- World view / inventory metadata (all optional) ---
+  /** City this cluster lives in (map label). */
+  city: string | null;
+  /** Country this cluster lives in (drives the map position via geocoding). */
+  country: string | null;
+  /** Explicit latitude (decimal degrees); overrides the country centroid on the map. */
+  latitude: number | null;
+  /** Explicit longitude (decimal degrees). */
+  longitude: number | null;
+  /** Orchestrator type (K3S / K8S / AKS). */
+  cluster_type: ClusterType | null;
+  /** Manufacturing plant this cluster belongs to. */
+  plant: string | null;
+  /** Deployment environment (dev / val / prod). */
+  environment: Environment | null;
+}
+
+/** Editable fields for `update_connection` (mirrors the Rust `ConnectionPatch`). */
+export interface ConnectionPatch {
+  name: string;
+  description: string | null;
+  namespace: string | null;
+  /** Remote-only; ignored for Direct entries. */
+  endpoint: string | null;
+  ca_path: string | null;
+  insecure: boolean;
+  city: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  cluster_type: ClusterType | null;
+  plant: string | null;
+  environment: Environment | null;
 }
 
 export type ThemeMode = "Dark" | "Light" | "Custom";

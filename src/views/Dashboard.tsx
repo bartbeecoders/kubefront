@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AppState, ClusterSummary, KubeStatus } from "../types";
+import type { AppState, ClusterSummary, ClusterType, Environment, KubeStatus } from "../types";
 import { CopyButton } from "../components/CopyButton";
+import { WorldMap, type MapPoint, type MapStatus } from "../components/WorldMap";
+import { locationLabel, resolveCoords } from "../geo";
 
 interface Props {
   settings: AppState;
@@ -25,6 +27,10 @@ interface ClusterCard {
   source: string;
   /** Per-connection namespace used to scope pod/deployment counts. */
   namespace: string | null;
+  // Inventory metadata (from the source connection entry):
+  environment: Environment | null;
+  clusterType: ClusterType | null;
+  plant: string | null;
   // Direct only:
   path?: string | null;
   context?: string;
@@ -96,6 +102,9 @@ export function DashboardView({ settings, status, onOpen, onSelectRemote }: Prop
           isK3s: false,
           source: e.name,
           namespace: e.namespace,
+          environment: e.environment,
+          clusterType: e.cluster_type,
+          plant: e.plant,
           remoteId: e.id,
         });
       }
@@ -108,10 +117,22 @@ export function DashboardView({ settings, status, onOpen, onSelectRemote }: Prop
             path: e.path as string | null,
             source: e.name,
             namespace: e.namespace,
+            environment: e.environment,
+            clusterType: e.cluster_type,
+            plant: e.plant,
           }))
         : settings.kubeconfigs.length
           ? []
-          : [{ path: status.kubeconfig_path, source: "Loaded kubeconfig", namespace: null }];
+          : [
+              {
+                path: status.kubeconfig_path,
+                source: "Loaded kubeconfig",
+                namespace: null,
+                environment: null as Environment | null,
+                clusterType: null as ClusterType | null,
+                plant: null as string | null,
+              },
+            ];
 
       for (const entry of entries) {
         try {
@@ -131,6 +152,9 @@ export function DashboardView({ settings, status, onOpen, onSelectRemote }: Prop
               isK3s: ctx.is_k3s,
               source: entry.source,
               namespace: entry.namespace,
+              environment: entry.environment,
+              clusterType: entry.clusterType,
+              plant: entry.plant,
               path: entry.path,
               context: ctx.name,
             });
@@ -162,6 +186,37 @@ export function DashboardView({ settings, status, onOpen, onSelectRemote }: Prop
       ? onSelectRemote(c.remoteId as string)
       : onOpen(c.path ?? null, c.context as string);
 
+  // World map: one marker per registered connection that has a resolvable location
+  // (explicit lat/lon, or a recognizable country). Reachability is derived from the
+  // health probes already running for the cards, so the map costs no extra calls.
+  const mapPoints: MapPoint[] = useMemo(() => {
+    const pts: MapPoint[] = [];
+    for (const e of settings.kubeconfigs) {
+      const coords = resolveCoords(e);
+      if (!coords) continue;
+      const related = cards.filter((c) =>
+        c.kind === "remote" ? c.remoteId === e.id : c.path === e.path,
+      );
+      const states = related.map((c) => summaries[c.key]).filter((s): s is SummaryState => !!s);
+      let mapStatus: MapStatus = "unknown";
+      if (states.some((s) => s.data?.reachable)) mapStatus = "online";
+      else if (states.some((s) => !s.loading && s.data && !s.data.reachable))
+        mapStatus = "unreachable";
+      pts.push({
+        id: e.id,
+        name: e.name,
+        coordinates: coords,
+        environment: e.environment,
+        clusterType: e.cluster_type,
+        plant: e.plant,
+        location: locationLabel(e),
+        status: mapStatus,
+        active: status.connected && settings.active_kubeconfig_id === e.id,
+      });
+    }
+    return pts;
+  }, [settings.kubeconfigs, settings.active_kubeconfig_id, status.connected, cards, summaries]);
+
   return (
     <div>
       <div className="page-head">
@@ -178,6 +233,30 @@ export function DashboardView({ settings, status, onOpen, onSelectRemote }: Prop
           ⟳ Refresh all
         </button>
       </div>
+
+      {settings.kubeconfigs.length > 0 && (
+        <div className="worldmap-section">
+          <div className="worldmap-head">
+            <h2>World view</h2>
+            <span className="dim">
+              {mapPoints.length} of {settings.kubeconfigs.length} connection
+              {settings.kubeconfigs.length === 1 ? "" : "s"} located
+            </span>
+          </div>
+          {mapPoints.length ? (
+            <WorldMap
+              points={mapPoints}
+              totalConnections={settings.kubeconfigs.length}
+              onSelect={onSelectRemote}
+            />
+          ) : (
+            <div className="empty">
+              No connection has a location yet. Edit a connection in Settings and set its city /
+              country to plot it here.
+            </div>
+          )}
+        </div>
+      )}
 
       {enumerating && !cards.length ? (
         <div className="empty">Discovering clusters…</div>
@@ -241,6 +320,16 @@ function ClusterCardView({
           {card.title}
         </span>
         {card.kind === "remote" && <span className="pill pill-remote">Remote</span>}
+        {card.clusterType && (
+          <span className="pill pill-type">
+            {card.clusterType === "K3s" ? "K3S" : card.clusterType === "K8s" ? "K8S" : "AKS"}
+          </span>
+        )}
+        {card.environment && (
+          <span className={`pill pill-env env-${card.environment.toLowerCase()}`}>
+            {card.environment}
+          </span>
+        )}
         {card.isK3s && <span className="k3s-badge">K3S</span>}
         {active && <span className="active-badge">connected</span>}
         <button
@@ -264,6 +353,7 @@ function ClusterCardView({
 
       <div className="cluster-meta dim">
         {card.source}
+        {card.plant ? ` · ${card.plant}` : ""}
         {card.namespace ? ` · ns/${card.namespace}` : ""}
         {" · "}
         <span className={`cluster-state ${dot}`}>{stateLabel}</span>

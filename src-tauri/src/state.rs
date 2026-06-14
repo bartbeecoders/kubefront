@@ -82,6 +82,24 @@ pub enum ConnMode {
     Remote,
 }
 
+/// The orchestrator a cluster runs on. User-declared metadata (distinct from the
+/// auto-detected K3S heuristic, which is per-context). `Option` on the entry means
+/// "unspecified", so no default variant is needed here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClusterType {
+    K3s,
+    K8s,
+    Aks,
+}
+
+/// The deployment environment a connection targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Environment {
+    Dev,
+    Val,
+    Prod,
+}
+
 /// Represents one registered connection — either a local kubeconfig (Direct) or a
 /// remote backend endpoint (Remote). Old settings.json files deserialize as Direct
 /// because every new field has a `#[serde(default)]`.
@@ -128,6 +146,38 @@ pub struct KubeconfigEntry {
     /// Skip TLS verification for the Remote endpoint (self-signed proxy). Unsafe.
     #[serde(default)]
     pub insecure: bool,
+
+    // === World view / inventory metadata (all optional, added later) ===
+    /// City this cluster lives in (free text, e.g. "Visp"). Used as a map label.
+    #[serde(default)]
+    pub city: Option<String>,
+
+    /// Country this cluster lives in (free text, e.g. "Switzerland"). Drives the
+    /// world-map position when explicit coordinates are absent (frontend geocodes
+    /// the country name to a centroid).
+    #[serde(default)]
+    pub country: Option<String>,
+
+    /// Optional explicit latitude (decimal degrees). Overrides the country centroid
+    /// so a plant can be pinned precisely on the dashboard map.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+
+    /// Optional explicit longitude (decimal degrees). See `latitude`.
+    #[serde(default)]
+    pub longitude: Option<f64>,
+
+    /// Orchestrator type (K3S / K8S / AKS). User-declared.
+    #[serde(default)]
+    pub cluster_type: Option<ClusterType>,
+
+    /// Manufacturing plant this cluster belongs to (free text).
+    #[serde(default)]
+    pub plant: Option<String>,
+
+    /// Deployment environment (dev / val / prod).
+    #[serde(default)]
+    pub environment: Option<Environment>,
 }
 
 impl KubeconfigEntry {
@@ -150,6 +200,13 @@ impl KubeconfigEntry {
             endpoint: None,
             ca_path: None,
             insecure: false,
+            city: None,
+            country: None,
+            latitude: None,
+            longitude: None,
+            cluster_type: None,
+            plant: None,
+            environment: None,
         }
     }
 
@@ -172,8 +229,50 @@ impl KubeconfigEntry {
             endpoint: Some(endpoint),
             ca_path,
             insecure,
+            city: None,
+            country: None,
+            latitude: None,
+            longitude: None,
+            cluster_type: None,
+            plant: None,
+            environment: None,
         }
     }
+}
+
+/// Editable fields for [`AppState::update_connection`], mirrored 1:1 by the
+/// `ConnectionPatch` TS type and the `update_connection` IPC command. Collected
+/// into a struct so the metadata can grow without an ever-longer argument list.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectionPatch {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    /// Remote-only; ignored for Direct entries.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Remote-only.
+    #[serde(default)]
+    pub ca_path: Option<String>,
+    /// Remote-only.
+    #[serde(default)]
+    pub insecure: bool,
+    #[serde(default)]
+    pub city: Option<String>,
+    #[serde(default)]
+    pub country: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    #[serde(default)]
+    pub cluster_type: Option<ClusterType>,
+    #[serde(default)]
+    pub plant: Option<String>,
+    #[serde(default)]
+    pub environment: Option<Environment>,
 }
 
 /// Serializable application state persisted to `settings.json`.
@@ -411,27 +510,25 @@ impl AppState {
     /// Update an existing connection's editable fields in place, keeping its `id`
     /// (and thus `active_kubeconfig_id`) stable. `endpoint`/`ca_path`/`insecure`
     /// only apply to Remote entries; for Direct entries the path is immutable
-    /// (pick a different file via "Add kubeconfig" instead). Returns false if no
-    /// entry with `id` exists.
-    #[allow(clippy::too_many_arguments)] // mirrors the update_connection IPC command
-    pub fn update_connection(
-        &mut self,
-        id: &str,
-        name: String,
-        description: Option<String>,
-        namespace: Option<String>,
-        endpoint: Option<String>,
-        ca_path: Option<String>,
-        insecure: bool,
-    ) -> bool {
+    /// (pick a different file via "Add kubeconfig" instead). World-view metadata
+    /// (location, cluster type, plant, environment) applies to both. Returns false
+    /// if no entry with `id` exists.
+    pub fn update_connection(&mut self, id: &str, patch: ConnectionPatch) -> bool {
         let Some(entry) = self.kubeconfigs.iter_mut().find(|k| k.id == id) else {
             return false;
         };
-        entry.name = name;
-        entry.description = description;
-        entry.namespace = namespace;
+        entry.name = patch.name;
+        entry.description = patch.description;
+        entry.namespace = patch.namespace;
+        entry.city = patch.city;
+        entry.country = patch.country;
+        entry.latitude = patch.latitude;
+        entry.longitude = patch.longitude;
+        entry.cluster_type = patch.cluster_type;
+        entry.plant = patch.plant;
+        entry.environment = patch.environment;
         if entry.mode == ConnMode::Remote {
-            if let Some(ep) = endpoint {
+            if let Some(ep) = patch.endpoint {
                 let ep = ep.trim().trim_end_matches('/').to_string();
                 if !ep.is_empty() {
                     entry.endpoint = Some(ep.clone());
@@ -440,8 +537,8 @@ impl AppState {
                     entry.path = ep;
                 }
             }
-            entry.ca_path = ca_path;
-            entry.insecure = insecure;
+            entry.ca_path = patch.ca_path;
+            entry.insecure = patch.insecure;
         }
         true
     }

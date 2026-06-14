@@ -29,7 +29,7 @@ use kubefront_core::{
 
 use crate::conn::Active;
 use crate::remote::RemoteKube;
-use crate::state::{AppState, ColorScheme, ConnMode};
+use crate::state::{AppState, ColorScheme, ConnMode, ConnectionPatch};
 
 /// All mutable application state shared across commands.
 #[derive(Default)]
@@ -663,30 +663,16 @@ pub async fn add_remote_connection(
 }
 
 /// Edit an existing connection (Direct or Remote) in place and persist settings.
-/// Keeps the entry's id stable; `endpoint`/`ca_path`/`insecure` are ignored for
-/// Direct entries. Returns the updated settings.
+/// Keeps the entry's id stable; `endpoint`/`ca_path`/`insecure` (carried in `patch`)
+/// are ignored for Direct entries. Returns the updated settings.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // args map 1:1 to the IPC surface (api.ts)
 pub async fn update_connection(
     state: State<'_, SharedBackend>,
     id: String,
-    name: String,
-    description: Option<String>,
-    namespace: Option<String>,
-    endpoint: Option<String>,
-    ca_path: Option<String>,
-    insecure: bool,
+    patch: ConnectionPatch,
 ) -> Result<AppState, String> {
     let mut b = state.lock().await;
-    if !b.settings.update_connection(
-        &id,
-        name,
-        description,
-        namespace,
-        endpoint,
-        ca_path,
-        insecure,
-    ) {
+    if !b.settings.update_connection(&id, patch) {
         return Err(format!("Connection '{id}' not found"));
     }
     b.settings.save_to_disk();
