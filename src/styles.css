@@ -861,22 +861,40 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
   padding-top: 14px;
 }
 
-/* === Text view modal (describe output) === */
+/* === Text view modal (describe output) ===
+   Wider by default and user-resizable: a flex column whose body flexes to
+   fill, with a drag handle in the bottom-right corner (resize: both). === */
 .modal.text-view {
-  width: 820px;
-  max-width: calc(100vw - 48px);
+  width: min(1100px, calc(100vw - 48px));
+  height: min(78vh, 760px);
+  min-width: 380px;
+  min-height: 240px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  resize: both;
+  overflow: hidden;
 }
 .text-view-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  flex: 0 0 auto;
+}
+.modal.text-view .modal-error {
+  flex: 0 0 auto;
 }
 .text-view-body {
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: 12px;
-  max-height: 64vh;
   overflow: auto;
   white-space: pre;
+}
+.modal.text-view .modal-actions {
+  flex: 0 0 auto;
 }
 
 /* === ConfigMap editor === */
