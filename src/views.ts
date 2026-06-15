@@ -154,6 +154,7 @@ export const TABLE_VIEWS: Partial<Record<ViewKey, TableView>> = {
     sections: [
       { title: "Services", kind: "services", empty: "No services in scope." },
       { title: "Ingresses", kind: "ingresses", empty: "No ingresses in scope." },
+      { title: "Ingress Classes", kind: "ingressclasses", empty: "No ingress classes found." },
       { title: "Network Policies", kind: "networkpolicies", empty: "No network policies in scope." },
     ],
   },
@@ -163,6 +164,12 @@ export const TABLE_VIEWS: Partial<Record<ViewKey, TableView>> = {
       { title: "Service Accounts", kind: "serviceaccounts", empty: "No service accounts in scope." },
       { title: "Roles", kind: "roles", empty: "No roles in scope." },
       { title: "Role Bindings", kind: "rolebindings", empty: "No role bindings in scope." },
+      { title: "Cluster Roles", kind: "clusterroles", empty: "No cluster roles found." },
+      {
+        title: "Cluster Role Bindings",
+        kind: "clusterrolebindings",
+        empty: "No cluster role bindings found.",
+      },
     ],
   },
   crds: {
@@ -194,10 +201,13 @@ export const DELETABLE_KINDS = new Set([
   "pvs",
   "storageclasses",
   "ingresses",
+  "ingressclasses",
   "networkpolicies",
   "serviceaccounts",
   "roles",
   "rolebindings",
+  "clusterroles",
+  "clusterrolebindings",
   "crds",
 ]);
 
@@ -217,10 +227,13 @@ export function kindLabel(kind: string): string {
     pvs: "persistent volume",
     storageclasses: "storage class",
     ingresses: "ingress",
+    ingressclasses: "ingress class",
     networkpolicies: "network policy",
     serviceaccounts: "service account",
     roles: "role",
     rolebindings: "role binding",
+    clusterroles: "cluster role",
+    clusterrolebindings: "cluster role binding",
     crds: "custom resource definition",
   };
   return labels[kind] ?? kind;

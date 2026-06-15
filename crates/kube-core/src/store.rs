@@ -12,8 +12,8 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
     ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
@@ -605,6 +605,68 @@ pub fn role_bindings_table(items: &[RoleBinding]) -> TableData {
                     role,
                     subjects,
                     obj_age(&rb.metadata),
+                ]
+            })
+            .collect(),
+    }
+}
+
+pub fn ingress_classes_table(items: &[IngressClass]) -> TableData {
+    TableData {
+        headers: hdr!["Name", "Controller", "Age"],
+        rows: items
+            .iter()
+            .map(|ic| {
+                let controller = ic
+                    .spec
+                    .as_ref()
+                    .and_then(|s| s.controller.clone())
+                    .unwrap_or_else(|| "-".into());
+                vec![obj_name(&ic.metadata), controller, obj_age(&ic.metadata)]
+            })
+            .collect(),
+    }
+}
+
+pub fn cluster_roles_table(items: &[ClusterRole]) -> TableData {
+    TableData {
+        headers: hdr!["Name", "Rules", "Age"],
+        rows: items
+            .iter()
+            .map(|cr| {
+                let rules = cr.rules.as_ref().map(|v| v.len()).unwrap_or(0);
+                vec![
+                    obj_name(&cr.metadata),
+                    rules.to_string(),
+                    obj_age(&cr.metadata),
+                ]
+            })
+            .collect(),
+    }
+}
+
+pub fn cluster_role_bindings_table(items: &[ClusterRoleBinding]) -> TableData {
+    TableData {
+        headers: hdr!["Name", "Role", "Subjects", "Age"],
+        rows: items
+            .iter()
+            .map(|crb| {
+                let role = format!("{}/{}", crb.role_ref.kind, crb.role_ref.name);
+                let subjects = crb
+                    .subjects
+                    .as_ref()
+                    .map(|s| {
+                        s.iter()
+                            .map(|sub| sub.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "-".into());
+                vec![
+                    obj_name(&crb.metadata),
+                    role,
+                    subjects,
+                    obj_age(&crb.metadata),
                 ]
             })
             .collect(),
