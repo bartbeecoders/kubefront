@@ -104,8 +104,8 @@ impl LocalKube {
             ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
             ServiceAccount,
         };
-        use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-        use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
+        use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+        use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
         use k8s_openapi::api::storage::v1::StorageClass;
         use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 
@@ -139,10 +139,15 @@ impl LocalKube {
             "pvs" => all_table!(PersistentVolume, store::pvs_table),
             "storageclasses" => all_table!(StorageClass, store::storage_classes_table),
             "ingresses" => ns_table!(Ingress, store::ingresses_table),
+            "ingressclasses" => all_table!(IngressClass, store::ingress_classes_table),
             "networkpolicies" => ns_table!(NetworkPolicy, store::network_policies_table),
             "serviceaccounts" => ns_table!(ServiceAccount, store::service_accounts_table),
             "roles" => ns_table!(Role, store::roles_table),
             "rolebindings" => ns_table!(RoleBinding, store::role_bindings_table),
+            "clusterroles" => all_table!(ClusterRole, store::cluster_roles_table),
+            "clusterrolebindings" => {
+                all_table!(ClusterRoleBinding, store::cluster_role_bindings_table)
+            }
             "crds" => all_table!(CustomResourceDefinition, store::crds_table),
             other => return Err(CoreError::Other(format!("Unknown resource kind: {other}"))),
         };
@@ -162,8 +167,8 @@ impl LocalKube {
             ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
             ServiceAccount,
         };
-        use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-        use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
+        use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+        use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
         use k8s_openapi::api::storage::v1::StorageClass;
         use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 
@@ -201,10 +206,13 @@ impl LocalKube {
             "pvs" => cluster_detail!(PersistentVolume),
             "storageclasses" => cluster_detail!(StorageClass),
             "ingresses" => ns_detail!(Ingress),
+            "ingressclasses" => cluster_detail!(IngressClass),
             "networkpolicies" => ns_detail!(NetworkPolicy),
             "serviceaccounts" => ns_detail!(ServiceAccount),
             "roles" => ns_detail!(Role),
             "rolebindings" => ns_detail!(RoleBinding),
+            "clusterroles" => cluster_detail!(ClusterRole),
+            "clusterrolebindings" => cluster_detail!(ClusterRoleBinding),
             "crds" => cluster_detail!(CustomResourceDefinition),
             other => return Err(CoreError::Other(format!("Unknown resource kind: {other}"))),
         };
@@ -226,8 +234,8 @@ impl LocalKube {
             ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
             ServiceAccount,
         };
-        use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
-        use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
+        use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+        use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
         use k8s_openapi::api::storage::v1::StorageClass;
         use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 
@@ -268,10 +276,13 @@ impl LocalKube {
             "namespaces" => cluster_delete!(Namespace),
             "storageclasses" => cluster_delete!(StorageClass),
             "ingresses" => ns_delete!(Ingress),
+            "ingressclasses" => cluster_delete!(IngressClass),
             "networkpolicies" => ns_delete!(NetworkPolicy),
             "serviceaccounts" => ns_delete!(ServiceAccount),
             "roles" => ns_delete!(Role),
             "rolebindings" => ns_delete!(RoleBinding),
+            "clusterroles" => cluster_delete!(ClusterRole),
+            "clusterrolebindings" => cluster_delete!(ClusterRoleBinding),
             "crds" => cluster_delete!(CustomResourceDefinition),
             other => {
                 return Err(CoreError::Other(format!(
