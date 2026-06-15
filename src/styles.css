@@ -945,7 +945,9 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
 
 /* === Settings === */
 .settings {
-  max-width: 760px;
+  /* Wide enough for the full connections table (6 columns incl. action
+     buttons) without clipping; still capped so prose fields stay readable. */
+  max-width: 1080px;
 }
 .field {
   margin-bottom: 18px;
