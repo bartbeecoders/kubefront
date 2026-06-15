@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 // Bundled offline TopoJSON (no tile servers / network) — see geo.ts for why.
 import worldTopo from "world-atlas/countries-110m.json";
 import type { ClusterType, Environment } from "../types";
@@ -78,12 +78,29 @@ function spread(points: MapPoint[]): MapPoint[] {
   return out;
 }
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+
+/** Map view (pan center + zoom). Controlled so the +/−/reset buttons and
+ *  wheel/drag gestures share one source of truth. */
+interface View {
+  coordinates: [number, number];
+  zoom: number;
+}
+const DEFAULT_VIEW: View = { coordinates: [0, 0], zoom: 1 };
+
 export function WorldMap({ points, totalConnections, onSelect }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number; point: MapPoint } | null>(null);
+  const [view, setView] = useState<View>(DEFAULT_VIEW);
 
   const placed = useMemo(() => spread(points), [points]);
   const missing = totalConnections - points.length;
+
+  const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+  const zoomBy = (factor: number) =>
+    setView((v) => ({ ...v, zoom: clampZoom(v.zoom * factor) }));
+  const resetView = () => setView(DEFAULT_VIEW);
 
   function onEnter(e: React.MouseEvent, point: MapPoint) {
     const rect = wrapRef.current?.getBoundingClientRect();
@@ -103,56 +120,96 @@ export function WorldMap({ points, totalConnections, onSelect }: Props) {
         height={440}
         style={{ width: "100%", height: "auto" }}
       >
-        <Geographies geography={worldTopo as unknown as Record<string, unknown>}>
-          {({ geographies }) =>
-            geographies.map((geo) => (
-              <Geography
-                key={geo.rsmKey}
-                geography={geo}
-                style={{
-                  default: {
-                    fill: "var(--map-land, #2a3344)",
-                    stroke: "var(--map-stroke, #3a455c)",
-                    strokeWidth: 0.5,
-                    outline: "none",
-                  },
-                  hover: { fill: "var(--map-land, #2a3344)", outline: "none" },
-                  pressed: { fill: "var(--map-land, #2a3344)", outline: "none" },
-                }}
-              />
-            ))
-          }
-        </Geographies>
+        <ZoomableGroup
+          center={view.coordinates}
+          zoom={view.zoom}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          onMoveEnd={(v) => setView({ coordinates: v.coordinates as [number, number], zoom: v.zoom })}
+          // Hide the tooltip while the user is dragging the map.
+          onMoveStart={() => setHover(null)}
+        >
+          <Geographies geography={worldTopo as unknown as Record<string, unknown>}>
+            {({ geographies }) =>
+              geographies.map((geo) => (
+                <Geography
+                  key={geo.rsmKey}
+                  geography={geo}
+                  style={{
+                    default: {
+                      fill: "var(--map-land, #2a3344)",
+                      stroke: "var(--map-stroke, #3a455c)",
+                      strokeWidth: 0.5,
+                      outline: "none",
+                    },
+                    hover: { fill: "var(--map-land, #2a3344)", outline: "none" },
+                    pressed: { fill: "var(--map-land, #2a3344)", outline: "none" },
+                  }}
+                />
+              ))
+            }
+          </Geographies>
 
-        {placed.map((p) => (
-          <Marker
-            key={p.id}
-            coordinates={p.coordinates}
-            onMouseEnter={(e) => onEnter(e, p)}
-            onMouseMove={(e) => onEnter(e, p)}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => onSelect(p.id)}
-            style={{
-              default: { cursor: "pointer" },
-              hover: { cursor: "pointer" },
-              pressed: { cursor: "pointer" },
-            }}
-          >
-            {p.active && (
-              <circle r={11} fill="none" stroke={envColor(p.environment)} strokeWidth={1.5} opacity={0.5}>
-                <animate attributeName="r" from="8" to="15" dur="1.6s" repeatCount="indefinite" />
-                <animate attributeName="opacity" from="0.5" to="0" dur="1.6s" repeatCount="indefinite" />
-              </circle>
-            )}
-            <circle
-              r={6}
-              fill={envColor(p.environment)}
-              stroke={STATUS_COLOR[p.status]}
-              strokeWidth={2.5}
-            />
-          </Marker>
-        ))}
+          {placed.map((p) => (
+            <Marker
+              key={p.id}
+              coordinates={p.coordinates}
+              onMouseEnter={(e) => onEnter(e, p)}
+              onMouseMove={(e) => onEnter(e, p)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onSelect(p.id)}
+              style={{
+                default: { cursor: "pointer" },
+                hover: { cursor: "pointer" },
+                pressed: { cursor: "pointer" },
+              }}
+            >
+              {/* Counter-scale so markers stay a constant screen size as the map zooms. */}
+              <g transform={`scale(${1 / view.zoom})`}>
+                {p.active && (
+                  <circle r={11} fill="none" stroke={envColor(p.environment)} strokeWidth={1.5} opacity={0.5}>
+                    <animate attributeName="r" from="8" to="15" dur="1.6s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.5" to="0" dur="1.6s" repeatCount="indefinite" />
+                  </circle>
+                )}
+                <circle
+                  r={6}
+                  fill={envColor(p.environment)}
+                  stroke={STATUS_COLOR[p.status]}
+                  strokeWidth={2.5}
+                />
+              </g>
+            </Marker>
+          ))}
+        </ZoomableGroup>
       </ComposableMap>
+
+      <div className="worldmap-zoom">
+        <button
+          className="btn sm"
+          title="Zoom in"
+          disabled={view.zoom >= MAX_ZOOM}
+          onClick={() => zoomBy(1.5)}
+        >
+          +
+        </button>
+        <button
+          className="btn sm"
+          title="Zoom out"
+          disabled={view.zoom <= MIN_ZOOM}
+          onClick={() => zoomBy(1 / 1.5)}
+        >
+          −
+        </button>
+        <button
+          className="btn sm"
+          title="Reset view"
+          disabled={view.zoom === DEFAULT_VIEW.zoom && view.coordinates[0] === 0 && view.coordinates[1] === 0}
+          onClick={resetView}
+        >
+          ⊜
+        </button>
+      </div>
 
       {hover && (
         <div
