@@ -211,8 +211,9 @@ impl LocalKube {
         Ok(detail)
     }
 
-    /// Delete a single resource of any supported kind. Namespaces and nodes are
-    /// deliberately NOT deletable — too destructive for a misclick.
+    /// Delete a single resource of any supported kind. Deleting a namespace
+    /// cascades to everything inside it, so the UI guards it behind an extra
+    /// confirmation; nodes remain deliberately NOT deletable.
     pub async fn delete_resource(
         &self,
         kind: &str,
@@ -222,7 +223,8 @@ impl LocalKube {
         use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
         use k8s_openapi::api::batch::v1::{CronJob, Job};
         use k8s_openapi::api::core::v1::{
-            ConfigMap, PersistentVolume, PersistentVolumeClaim, Secret, Service, ServiceAccount,
+            ConfigMap, Namespace, PersistentVolume, PersistentVolumeClaim, Secret, Service,
+            ServiceAccount,
         };
         use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
         use k8s_openapi::api::rbac::v1::{Role, RoleBinding};
@@ -263,6 +265,7 @@ impl LocalKube {
             "secrets" => ns_delete!(Secret),
             "pvcs" => ns_delete!(PersistentVolumeClaim),
             "pvs" => cluster_delete!(PersistentVolume),
+            "namespaces" => cluster_delete!(Namespace),
             "storageclasses" => cluster_delete!(StorageClass),
             "ingresses" => ns_delete!(Ingress),
             "networkpolicies" => ns_delete!(NetworkPolicy),

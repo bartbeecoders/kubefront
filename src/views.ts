@@ -177,8 +177,10 @@ export const RESTARTABLE_KINDS = new Set(["deployments", "statefulsets", "daemon
 /** Kinds the UI can edit in place (currently only ConfigMap `data`). */
 export const EDITABLE_KINDS = new Set(["configmaps"]);
 
-/** Kinds the UI allows deleting (namespaces/nodes deliberately excluded). */
+/** Kinds the UI allows deleting (nodes deliberately excluded; deleting a
+ *  namespace cascades to its contents and is guarded by an extra confirmation). */
 export const DELETABLE_KINDS = new Set([
+  "namespaces",
   "pods",
   "services",
   "deployments",

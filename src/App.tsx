@@ -364,11 +364,16 @@ export default function App() {
   }
 
   function requestDelete(kind: string, namespace: string | null, name: string) {
+    const isNamespace = kind === "namespaces";
     setConfirm({
       title: `Delete ${kindLabel(kind)}`,
-      message: `Delete ${kindLabel(kind)} "${fullName(namespace, name)}"? This cannot be undone.`,
+      message: isNamespace
+        ? `Delete namespace "${name}"? This permanently deletes EVERYTHING inside it (pods, services, configmaps, …) and cannot be undone.`
+        : `Delete ${kindLabel(kind)} "${fullName(namespace, name)}"? This cannot be undone.`,
       confirmLabel: "Delete",
       danger: true,
+      // Require typing the namespace name as an extra guard for the cascading delete.
+      confirmText: isNamespace ? name : undefined,
       action: async () => {
         await api.deleteResource(kind, namespace, name);
         clearIfSelected(kind, namespace, name);

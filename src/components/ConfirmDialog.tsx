@@ -7,6 +7,9 @@ export interface ConfirmRequest {
   confirmLabel: string;
   /** Danger styles the confirm button red (deletes). */
   danger?: boolean;
+  /** When set, the user must type this exact string to enable confirm
+   *  (extra guard for cascading deletes like namespaces). */
+  confirmText?: string;
   action: () => Promise<void>;
 }
 
@@ -19,6 +22,9 @@ interface Props {
 export function ConfirmDialog({ req, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+
+  const confirmGated = req.confirmText !== undefined && typed !== req.confirmText;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -45,6 +51,20 @@ export function ConfirmDialog({ req, onClose }: Props) {
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">{req.title}</div>
         <div className="modal-body">{req.message}</div>
+        {req.confirmText !== undefined && (
+          <input
+            className="input"
+            style={{ marginTop: 12, width: "100%" }}
+            placeholder={`Type "${req.confirmText}" to confirm`}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            disabled={busy}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !confirmGated && !busy) onConfirm();
+            }}
+          />
+        )}
         {error && <div className="modal-error">⚠ {error}</div>}
         <div className="modal-actions">
           <button className="btn" onClick={onClose} disabled={busy}>
@@ -53,8 +73,8 @@ export function ConfirmDialog({ req, onClose }: Props) {
           <button
             className={`btn ${req.danger ? "danger" : "primary"}`}
             onClick={onConfirm}
-            disabled={busy}
-            autoFocus
+            disabled={busy || confirmGated}
+            autoFocus={req.confirmText === undefined}
           >
             {busy ? "Working…" : req.confirmLabel}
           </button>
