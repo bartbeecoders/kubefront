@@ -541,6 +541,79 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
   user-select: text;
 }
 
+/* === Manifest viewer (searchable YAML/JSON, inline + fullscreen) === */
+.manifest-viewer {
+  margin-top: 8px;
+}
+.manifest-toolbar,
+.manifest-full-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.manifest-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.manifest-search .input {
+  flex: 1 1 auto;
+  min-width: 80px;
+}
+.input.sm,
+.btn.sm {
+  font-size: 0.82em;
+}
+.input.sm {
+  padding: 3px 7px;
+}
+.manifest-search-count {
+  font-size: 0.78em;
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.manifest-viewer .manifest {
+  margin-top: 8px;
+}
+.manifest-match {
+  background: var(--status-warning, #fbbf24);
+  color: #0b1220;
+  border-radius: 2px;
+}
+.manifest-match.active {
+  background: var(--accent);
+  color: #0b1220;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Fullscreen manifest overlay — fills most of the viewport. */
+.modal.manifest-full {
+  width: calc(100vw - 64px);
+  height: calc(100vh - 64px);
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+.manifest-full-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.manifest-full-head .manifest-search {
+  flex: 0 1 320px;
+}
+.modal.manifest-full .manifest {
+  flex: 1 1 auto;
+  max-height: none;
+  margin-top: 12px;
+}
+
 /* === Status bar === */
 .statusbar {
   display: flex;

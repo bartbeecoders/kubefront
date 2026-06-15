@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { PodRow, ResourceDetail, Selection } from "../types";
 import { DELETABLE_KINDS, EDITABLE_KINDS, RESTARTABLE_KINDS, statusClass } from "../views";
 import { CopyButton, copyText } from "./CopyButton";
+import { ManifestViewer } from "./ManifestViewer";
 
 interface Props {
   selected: Selection | null;
@@ -160,7 +161,7 @@ export function DetailPanel({
             </button>
             <CopyButton text={() => detail.manifest} title="Copy manifest JSON" label="Copy manifest" />
           </div>
-          {showManifest && <pre className="manifest">{detail.manifest}</pre>}
+          {showManifest && <ManifestViewer text={detail.manifest} title={selected.name} />}
         </>
       )}
     </aside>
