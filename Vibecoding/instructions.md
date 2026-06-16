@@ -72,3 +72,18 @@ Add also some other parameters to the connection:
 - cluster type (K3S, K8S, AKS)
 - Manufacturing plant
 - Environment (dev, val, prod)
+
+
+### additional K8S objects to manage
+- Ingress
+- IngressClass
+- ServiceAccount
+- Role
+- RoleBinding
+- ClusterRole
+- ClusterRoleBinding
+- NetworkPolicy
+
+
+### Terminal window
+Add a terminal window to the app that allows the user to execute kubectl commands.
