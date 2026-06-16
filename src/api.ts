@@ -14,6 +14,7 @@ import type {
   PodRow,
   ResourceDetail,
   TableData,
+  TerminalEvent,
 } from "./types";
 
 export const api = {
@@ -99,4 +100,24 @@ export const api = {
     });
   },
   stopLogs: (id: number) => invoke<void>("stop_logs", { id }),
+
+  // --- Embedded terminal (PTY) ---
+  /** Open a PTY-backed shell scoped to the active cluster. `onEvent` receives
+   *  output bytes + the exit event; returns the terminal id for the other calls. */
+  openTerminal: (
+    cols: number,
+    rows: number,
+    onEvent: (e: TerminalEvent) => void,
+  ): Promise<number> => {
+    const channel = new Channel<TerminalEvent>();
+    channel.onmessage = onEvent;
+    return invoke<number>("terminal_open", { onEvent: channel, cols, rows });
+  },
+  /** Send keystrokes (xterm onData) to the shell. */
+  writeTerminal: (id: number, data: string) => invoke<void>("terminal_write", { id, data }),
+  /** Resize the PTY to match the xterm viewport. */
+  resizeTerminal: (id: number, cols: number, rows: number) =>
+    invoke<void>("terminal_resize", { id, cols, rows }),
+  /** Kill the shell and free the session. */
+  closeTerminal: (id: number) => invoke<void>("terminal_close", { id }),
 };

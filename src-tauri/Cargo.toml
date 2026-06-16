@@ -44,6 +44,13 @@ chrono = { workspace = true }
 # Serialization (IPC + persistence)
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Serialize a scoped kubeconfig (current-context pinned) for the embedded
+# terminal so kubectl in the shell targets exactly the active cluster.
+serde_yaml = "0.9"
+
+# Embedded interactive terminal: a real cross-platform PTY (the shell runs
+# under it, so `kubectl exec -it`, watch, etc. work).
+portable-pty = "0.8"
 
 # Logging
 tracing = { workspace = true }

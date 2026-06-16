@@ -176,3 +176,10 @@ export interface Selection {
   /** Projected [header, value] pairs from the table row (name excluded). */
   summary: [string, string][];
 }
+
+/** Event streamed from an embedded terminal's PTY (mirrors the Rust
+ *  `TerminalEvent` tagged enum). `output` carries raw bytes for xterm; `exit`
+ *  carries the shell's exit code (null if unknown). */
+export type TerminalEvent =
+  | { event: "output"; data: number[] }
+  | { event: "exit"; data: number | null };

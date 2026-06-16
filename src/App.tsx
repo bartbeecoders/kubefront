@@ -20,6 +20,7 @@ import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { DetailPanel } from "./components/DetailPanel";
 import { LogWindow, type LogWindowState } from "./components/LogWindow";
+import { TerminalWindow } from "./components/TerminalWindow";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
 import { ConfigMapEditor, type ConfigMapEditRequest } from "./components/ConfigMapEditor";
 import { ConnectionEditor } from "./components/ConnectionEditor";
@@ -113,6 +114,16 @@ export default function App() {
 
   const [logWins, setLogWins] = useState<LogWindowState[]>([]);
   const nextWinId = useRef(1);
+
+  // Open terminal windows (each hosts its own PTY-backed shell).
+  const [termWins, setTermWins] = useState<number[]>([]);
+  const nextTermId = useRef(1);
+  function openTerminal() {
+    setTermWins((w) => [...w, nextTermId.current++]);
+  }
+  function closeTerminal(id: number) {
+    setTermWins((w) => w.filter((x) => x !== id));
+  }
 
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [editConn, setEditConn] = useState<KubeconfigEntry | null>(null);
@@ -520,6 +531,7 @@ export default function App() {
         onSelectContext={selectContext}
         onReconnect={doConnect}
         onRefresh={() => refreshRef.current()}
+        onOpenTerminal={openTerminal}
         autoRefreshSecs={settings.auto_refresh_secs}
       />
 
@@ -573,6 +585,10 @@ export default function App() {
           onPatch={patchLog}
           onChangeContainer={changeContainer}
         />
+      ))}
+
+      {termWins.map((id, i) => (
+        <TerminalWindow key={id} winId={id} index={i} onClose={closeTerminal} />
       ))}
 
       {confirm && <ConfirmDialog req={confirm} onClose={() => setConfirm(null)} />}

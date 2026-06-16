@@ -1048,6 +1048,49 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
 .logline.err {
   color: var(--status-failed);
 }
+
+/* === Terminal window (PTY + xterm.js) — floating, draggable, resizable === */
+.termwin {
+  position: fixed;
+  width: 760px;
+  height: 460px;
+  min-width: 420px;
+  min-height: 240px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 120;
+  overflow: hidden;
+  resize: both;
+}
+.termwin-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+}
+.termwin-head .title {
+  font-weight: 600;
+  font-size: 0.85em;
+  flex: 1;
+}
+.termwin-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 6px 2px;
+  background: #0b0e14;
+}
+.termwin-host {
+  width: 100%;
+  height: 100%;
+}
 .checkbox {
   display: inline-flex;
   align-items: center;

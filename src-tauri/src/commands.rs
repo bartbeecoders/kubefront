@@ -41,6 +41,9 @@ pub struct Backend {
     /// Active log streams → cancellation sender. Dropping/sending stops the stream.
     pub log_streams: HashMap<u64, oneshot::Sender<()>>,
     pub next_stream_id: u64,
+    /// Live embedded terminals (PTY sessions) keyed by id.
+    pub terminals: HashMap<u64, crate::terminal::TerminalSession>,
+    pub next_terminal_id: u64,
 }
 
 pub type SharedBackend = Mutex<Backend>;
