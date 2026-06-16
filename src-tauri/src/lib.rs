@@ -8,6 +8,7 @@ mod commands;
 mod conn;
 mod remote;
 mod state;
+mod terminal;
 
 use commands::Backend;
 use kubefront_core::KubeConfigManager;
@@ -179,6 +180,10 @@ pub fn run() {
             commands::test_remote_connection,
             commands::remote_summary,
             commands::select_connection,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running KubeFront");

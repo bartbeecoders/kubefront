@@ -9,6 +9,7 @@ interface Props {
   onSelectContext: (name: string) => void;
   onReconnect: () => void;
   onRefresh: () => void;
+  onOpenTerminal: () => void;
   autoRefreshSecs: number;
 }
 
@@ -98,6 +99,9 @@ export function TopBar(props: Props) {
 
       <div className="spacer" />
 
+      <button className="btn sm" title="Open a terminal scoped to the active cluster" onClick={props.onOpenTerminal}>
+        ⌨ Terminal
+      </button>
       <span className="ctx-label">Auto: {props.autoRefreshSecs}s</span>
       <button className="btn sm" onClick={props.onRefresh}>
         Refresh
