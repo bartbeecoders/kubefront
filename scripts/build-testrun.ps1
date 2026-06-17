@@ -12,6 +12,7 @@
 #   .\scripts\build-testrun.ps1            # full clean build of both exes
 #   .\scripts\build-testrun.ps1 -NoBackend # desktop only
 #   .\scripts\build-testrun.ps1 -KeepDist  # skip wiping dist\ first (faster, riskier)
+#   .\scripts\build-testrun.ps1 -CertPath C:\NetData\CodeCertificates\CodeSign.pfx -CertPassword ''  # sign the staged .exe files
 #
 # Why this exists / why a plain `cargo build` can give "page not found":
 #   The desktop frontend is embedded into kube-front.exe at COMPILE time (Tauri
@@ -25,7 +26,9 @@
 param(
     [switch]$NoBackend,
     [switch]$KeepDist,
-    [switch]$NoOpenSslWorkaround
+    [switch]$NoOpenSslWorkaround,
+    [string]$CertPath,
+    [string]$CertPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,6 +106,29 @@ foreach ($exe in $exes) {
     $src = Join-Path $ReleaseDir $exe
     if (-not (Test-Path $src)) { throw "expected build output not found: $src" }
     Copy-Item $src (Join-Path $TestrunDir $exe) -Force
+}
+
+# 7b. Code-sign the staged exes (optional).
+if ($CertPath) {
+    Invoke-Step "Code-signing" {
+        $secPass = ConvertTo-SecureString $CertPassword -AsPlainText -Force
+        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertPath, $secPass)
+        foreach ($exe in $exes) {
+            $path = Join-Path $TestrunDir $exe
+            if (Test-Path $path) {
+                Write-Host "  Signing $exe ..." -ForegroundColor Yellow
+                $sig = Set-AuthenticodeSignature -FilePath $path -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+                if ($sig.Status -eq "Valid") {
+                    Write-Host "  $exe — signed OK" -ForegroundColor Green
+                } elseif ($sig.Status -eq "UnknownError") {
+                    # Chain not trusted locally — signature is still embedded.
+                    Write-Host "  $exe — signed (chain not trusted locally, safe to distribute)" -ForegroundColor DarkYellow
+                } else {
+                    throw "Signing $exe failed: $($sig.Status) — $($sig.StatusMessage)"
+                }
+            }
+        }
+    }
 }
 
 # 8. Seed a backend.toml in testrun\ if the user doesn't have one yet.

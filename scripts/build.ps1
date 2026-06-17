@@ -15,6 +15,7 @@
 #   .\scripts\build.ps1 -Bundle         # produce installers via `tauri build` (NSIS/MSI)
 #   .\scripts\build.ps1 -SkipFrontend   # skip the npm frontend build
 #   .\scripts\build.ps1 -NoOpenSslWorkaround   # CI: build vendored OpenSSL normally
+#   .\scripts\build.ps1 -CertPath C:\NetData\CodeCertificates\CodeSign.pfx -CertPassword ''  # sign .exe files
 #
 # OpenSSL note: locally this reuses the prebuilt vendored OpenSSL under
 # src-tauri\target (no Perl/NASM needed). See scripts\_cargo-env.ps1.
@@ -25,7 +26,9 @@ param(
     [switch]$Desktop,
     [switch]$Bundle,
     [switch]$SkipFrontend,
-    [switch]$NoOpenSslWorkaround
+    [switch]$NoOpenSslWorkaround,
+    [string]$CertPath,
+    [string]$CertPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,4 +98,27 @@ foreach ($exe in @("kube-front.exe", "kubefront-backend.exe")) {
 }
 if ($Bundle) {
     Write-Host "  installers                 $(Join-Path $ReleaseDir 'bundle')"
+}
+
+# 5. Code-sign executables (optional).
+if ($CertPath) {
+    Invoke-Step "Code-signing" {
+        $secPass = ConvertTo-SecureString $CertPassword -AsPlainText -Force
+        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertPath, $secPass)
+        foreach ($exe in @("kube-front.exe", "kubefront-backend.exe")) {
+            $path = Join-Path $ReleaseDir $exe
+            if (Test-Path $path) {
+                Write-Host "  Signing $exe ..." -ForegroundColor Yellow
+                $sig = Set-AuthenticodeSignature -FilePath $path -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+                if ($sig.Status -eq "Valid") {
+                    Write-Host "  $exe — signed OK" -ForegroundColor Green
+                } elseif ($sig.Status -eq "UnknownError") {
+                    # Chain not trusted locally — signature is still embedded.
+                    Write-Host "  $exe — signed (chain not trusted locally, safe to distribute)" -ForegroundColor DarkYellow
+                } else {
+                    throw "Signing $exe failed: $($sig.Status) — $($sig.StatusMessage)"
+                }
+            }
+        }
+    }
 }

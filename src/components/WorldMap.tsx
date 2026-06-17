@@ -125,13 +125,13 @@ export function WorldMap({ points, totalConnections, onSelect }: Props) {
           zoom={view.zoom}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
-          onMoveEnd={(v) => setView({ coordinates: v.coordinates as [number, number], zoom: v.zoom })}
+          onMoveEnd={(v: { coordinates: [number, number]; zoom: number }) => setView({ coordinates: v.coordinates, zoom: v.zoom })}
           // Hide the tooltip while the user is dragging the map.
           onMoveStart={() => setHover(null)}
         >
           <Geographies geography={worldTopo as unknown as Record<string, unknown>}>
-            {({ geographies }) =>
-              geographies.map((geo) => (
+            {({ geographies }: { geographies: any[] }) =>
+              geographies.map((geo: any) => (
                 <Geography
                   key={geo.rsmKey}
                   geography={geo}
@@ -154,8 +154,8 @@ export function WorldMap({ points, totalConnections, onSelect }: Props) {
             <Marker
               key={p.id}
               coordinates={p.coordinates}
-              onMouseEnter={(e) => onEnter(e, p)}
-              onMouseMove={(e) => onEnter(e, p)}
+              onMouseEnter={(e: any) => onEnter(e, p)}
+              onMouseMove={(e: any) => onEnter(e, p)}
               onMouseLeave={() => setHover(null)}
               onClick={() => onSelect(p.id)}
               style={{
