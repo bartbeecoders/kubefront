@@ -101,6 +101,42 @@ export interface ConnectionPatch {
   environment: Environment | null;
 }
 
+// --- Azure AKS (mirrors src-tauri/src/azure.rs DTOs) ---
+
+/** Result of probing the local Azure CLI for an active `az login` session. */
+export interface AzureStatus {
+  /** Whether the `az` binary could be found and run. */
+  installed: boolean;
+  /** Whether an active `az login` session exists. */
+  logged_in: boolean;
+  /** Signed-in user (UPN / service-principal id), when available. */
+  user: string | null;
+  /** Active tenant id, when available. */
+  tenant_id: string | null;
+  /** Human-readable reason when not installed / not logged in. */
+  error: string | null;
+}
+
+/** One Azure subscription visible to the signed-in account. */
+export interface AzureSubscription {
+  id: string;
+  name: string;
+  tenant_id: string | null;
+  is_default: boolean;
+}
+
+/** One AKS managed cluster within a subscription. */
+export interface AksCluster {
+  name: string;
+  resource_group: string;
+  location: string | null;
+  kubernetes_version: string | null;
+  /** Power state code (e.g. "Running" / "Stopped"), when reported. */
+  power_state: string | null;
+  /** Whether the cluster has Azure AD integration enabled. */
+  aad_enabled: boolean;
+}
+
 export type ThemeMode = "Dark" | "Light" | "Custom";
 
 export type ColorSchemeKey =

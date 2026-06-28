@@ -833,7 +833,7 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
 /* === Connection editor: bounded height so long forms scroll instead of
    clipping the dialog (title stays on top, actions pinned at the bottom). === */
 .modal.conn-editor {
-  width: 520px;
+  width: 680px;
   display: flex;
   flex-direction: column;
   max-height: 88vh;

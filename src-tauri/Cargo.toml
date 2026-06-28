@@ -35,8 +35,9 @@ reqwest = { workspace = true }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
 
-# Async runtime & channels
-tokio = { workspace = true }
+# Async runtime & channels. `process` (added on top of the workspace features) is
+# needed by src/azure.rs to shell out to the `az`/`kubelogin` CLIs for AKS import.
+tokio = { workspace = true, features = ["process"] }
 
 # Time & formatting
 chrono = { workspace = true }

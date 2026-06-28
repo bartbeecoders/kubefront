@@ -27,9 +27,10 @@ use kubefront_core::{
     LocalKube, LogEvent, NodeRow, PodRow, ResourceDetail, TableData,
 };
 
+use crate::azure::{self, AksCluster, AzureStatus, AzureSubscription};
 use crate::conn::Active;
 use crate::remote::RemoteKube;
-use crate::state::{AppState, ColorScheme, ConnMode, ConnectionPatch};
+use crate::state::{AppState, ClusterType, ColorScheme, ConnMode, ConnectionPatch};
 
 /// All mutable application state shared across commands.
 #[derive(Default)]
@@ -785,4 +786,56 @@ pub async fn select_connection(
         ConnMode::Remote => connect_remote(state, id).await,
         ConnMode::Direct => switch_kubeconfig(state, entry.path).await,
     }
+}
+
+// ============================================================================
+// Azure AKS (browse subscriptions/clusters via the `az` CLI, import as Direct)
+// ============================================================================
+
+/// Probe the local Azure CLI: installed? logged in? Used by the AKS wizard's
+/// preflight step. Never errors — problems are encoded in the returned status.
+#[tauri::command]
+pub async fn azure_status() -> Result<AzureStatus, String> {
+    Ok(azure::status().await)
+}
+
+/// List the Azure subscriptions visible to the signed-in `az` account.
+#[tauri::command]
+pub async fn azure_subscriptions() -> Result<Vec<AzureSubscription>, String> {
+    azure::subscriptions().await
+}
+
+/// List the AKS clusters within a subscription.
+#[tauri::command]
+pub async fn azure_aks_clusters(subscription_id: String) -> Result<Vec<AksCluster>, String> {
+    azure::aks_clusters(&subscription_id).await
+}
+
+/// Fetch AAD credentials for an AKS cluster (`az aks get-credentials` +
+/// `kubelogin convert-kubeconfig -l azurecli`), then register the resulting
+/// kubeconfig as a Direct connection tagged as AKS. Returns updated settings;
+/// the user then connects via `select_connection` like any other Direct entry.
+#[tauri::command]
+pub async fn add_aks_connection(
+    state: State<'_, SharedBackend>,
+    subscription_id: String,
+    resource_group: String,
+    cluster_name: String,
+    display_name: Option<String>,
+) -> Result<AppState, String> {
+    let (path, context) = azure::add_aks(&subscription_id, &resource_group, &cluster_name).await?;
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut b = state.lock().await;
+    let id = b.settings.register_kubeconfig(path_str);
+    if let Some(entry) = b.settings.kubeconfigs.iter_mut().find(|k| k.id == id) {
+        entry.name = display_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or(cluster_name);
+        entry.cluster_type = Some(ClusterType::Aks);
+        entry.last_context = context;
+    }
+    b.settings.save_to_disk();
+    Ok(b.settings.clone())
 }

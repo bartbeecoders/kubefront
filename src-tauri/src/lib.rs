@@ -4,6 +4,7 @@
 //! state, and command registration. The actual UI is the React/Vite frontend
 //! rendered in the native WebView. TLS is handled by OpenSSL (see Cargo.toml).
 
+mod azure;
 mod commands;
 mod conn;
 mod remote;
@@ -180,6 +181,10 @@ pub fn run() {
             commands::test_remote_connection,
             commands::remote_summary,
             commands::select_connection,
+            commands::azure_status,
+            commands::azure_subscriptions,
+            commands::azure_aks_clusters,
+            commands::add_aks_connection,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,

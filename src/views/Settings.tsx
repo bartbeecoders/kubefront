@@ -12,6 +12,8 @@ interface Props {
   onReset: () => void;
   onBrowse: () => void;
   onAddKubeconfig: () => void;
+  /** Open the Azure AKS import wizard. */
+  onAddAks: () => void;
   /** Make a connection (Direct or Remote) active and connect to it. */
   onSelect: (id: string) => void;
   /** Register a remote backend connection. */
@@ -152,9 +154,14 @@ export function SettingsView(props: Props) {
         (empty = use the default namespace above; auto-filled from the kubeconfig's context on
         first connect). Saved to settings.json.
       </div>
-      <button className="btn" onClick={props.onAddKubeconfig}>
-        ＋ Add kubeconfig file…
-      </button>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn" onClick={props.onAddKubeconfig}>
+          ＋ Add kubeconfig file…
+        </button>
+        <button className="btn" onClick={props.onAddAks}>
+          ＋ Add AKS cluster…
+        </button>
+      </div>
 
       <div style={{ marginTop: 12 }}>
         {settings.kubeconfigs.length === 0 ? (

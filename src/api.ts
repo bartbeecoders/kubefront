@@ -3,7 +3,10 @@
 
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type {
+  AksCluster,
   AppState,
+  AzureStatus,
+  AzureSubscription,
   ClusterSummary,
   ColorSchemeInfo,
   ConnectionPatch,
@@ -47,6 +50,28 @@ export const api = {
     invoke<ClusterSummary>("remote_summary", { connectionId }),
   /** Make a connection active and connect to it (dispatches by its mode). */
   selectConnection: (id: string) => invoke<KubeStatus>("select_connection", { id }),
+
+  // --- Azure AKS ---
+  /** Probe the local Azure CLI: installed? logged in? (preflight for the AKS wizard). */
+  azureStatus: () => invoke<AzureStatus>("azure_status"),
+  /** List the Azure subscriptions visible to the signed-in `az` account. */
+  azureSubscriptions: () => invoke<AzureSubscription[]>("azure_subscriptions"),
+  /** List the AKS clusters within a subscription. */
+  azureAksClusters: (subscriptionId: string) =>
+    invoke<AksCluster[]>("azure_aks_clusters", { subscriptionId }),
+  /** Fetch AAD credentials for an AKS cluster and register it as a Direct connection. */
+  addAksConnection: (
+    subscriptionId: string,
+    resourceGroup: string,
+    clusterName: string,
+    displayName: string | null,
+  ) =>
+    invoke<AppState>("add_aks_connection", {
+      subscriptionId,
+      resourceGroup,
+      clusterName,
+      displayName,
+    }),
 
   loadKubeconfig: (path: string | null) =>
     invoke<KubeStatus>("load_kubeconfig", { path }),

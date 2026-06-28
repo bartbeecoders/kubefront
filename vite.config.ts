@@ -16,8 +16,11 @@ export default defineConfig({
       ? { protocol: "ws", host, port: 1421 }
       : undefined,
     watch: {
-      // Don't watch the Rust backend.
-      ignored: ["**/src-tauri/**"],
+      // Don't watch the Rust backend or the Cargo build output. `target/` sits at
+      // the workspace root (not under src-tauri/), so it must be ignored explicitly —
+      // otherwise vite's watcher hits EBUSY on build artifacts cargo is actively
+      // writing during a dev build.
+      ignored: ["**/src-tauri/**", "**/target/**"],
     },
   },
   // Tauri expects a fixed dist output.

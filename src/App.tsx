@@ -24,6 +24,7 @@ import { TerminalWindow } from "./components/TerminalWindow";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
 import { ConfigMapEditor, type ConfigMapEditRequest } from "./components/ConfigMapEditor";
 import { ConnectionEditor } from "./components/ConnectionEditor";
+import { AksWizard } from "./components/AksWizard";
 import { TextViewModal } from "./components/TextViewModal";
 
 import { DashboardView } from "./views/Dashboard";
@@ -127,6 +128,7 @@ export default function App() {
 
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [editConn, setEditConn] = useState<KubeconfigEntry | null>(null);
+  const [showAksWizard, setShowAksWizard] = useState(false);
   const [editCm, setEditCm] = useState<ConfigMapEditRequest | null>(null);
   // Bumped to force the DetailPanel to re-fetch its manifest after an edit.
   const [detailReloadKey, setDetailReloadKey] = useState(0);
@@ -601,6 +603,13 @@ export default function App() {
         />
       )}
 
+      {showAksWizard && (
+        <AksWizard
+          onClose={() => setShowAksWizard(false)}
+          onSaved={async () => setSettings(await api.getSettings())}
+        />
+      )}
+
       {editCm && (
         <ConfigMapEditor
           req={editCm}
@@ -674,6 +683,7 @@ export default function App() {
               if (p) patchSettings({ kubeconfig_path: p });
             }}
             onAddKubeconfig={loadFromFile}
+            onAddAks={() => setShowAksWizard(true)}
             onSelect={selectConnection}
             onAddRemote={addRemote}
             onEdit={editConnection}
