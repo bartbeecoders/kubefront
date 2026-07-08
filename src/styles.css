@@ -590,6 +590,55 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* Decoded Secret data — one block per key. */
+.secret-decoded {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.secret-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.secret-entry-key {
+  font-size: 0.82em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secret-entry-tag {
+  flex: 0 0 auto;
+  font-size: 0.7em;
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.secret-entry-tag.err {
+  color: var(--status-failed);
+  border-color: var(--status-failed);
+}
+.secret-entry-head .copy-btn {
+  margin-left: auto;
+}
+.secret-entry-value {
+  margin: 4px 0 0;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* Fullscreen manifest overlay — fills most of the viewport. */
 .modal.manifest-full {
   width: calc(100vw - 64px);
@@ -897,9 +946,19 @@ table.kt tbody tr:hover .row-actions .btn.ghost {
   flex: 0 0 auto;
 }
 
-/* === ConfigMap editor === */
+/* === ConfigMap / Secret editor === */
 .modal.cm-editor {
   width: 640px;
+}
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Masked Secret values — hide characters until "Reveal" is toggled. */
+.cm-entry .cm-value.masked {
+  -webkit-text-security: disc;
 }
 .cm-entries {
   margin-top: 14px;

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 
-export interface ConfigMapEditRequest {
+export interface DataEditRequest {
+  /** Which resource is being edited — decides the title and the save command. */
+  kind: "configmaps" | "secrets";
   namespace: string;
   name: string;
-  /** Current `data` map of the ConfigMap, used to seed the form. */
+  /** Current text entries, used to seed the form (plaintext for both kinds). */
   data: Record<string, string>;
+  /** Secrets only: number of binary (non-UTF-8) entries preserved untouched. */
+  binaryCount?: number;
 }
 
 interface Props {
-  req: ConfigMapEditRequest;
+  req: DataEditRequest;
   onClose: () => void;
   /** Called after a successful save so the caller can refresh views. */
   onSaved: () => void;
@@ -21,13 +25,17 @@ interface Entry {
   value: string;
 }
 
-/** Modal editor for a ConfigMap's `data` key/value pairs (add, edit, remove). */
-export function ConfigMapEditor({ req, onClose, onSaved }: Props) {
+/** Modal editor for a ConfigMap's or Secret's key/value data (add, edit, remove).
+ *  Secret values are masked by default and can be revealed; binary Secret entries
+ *  are left untouched by the backend and reported via `req.binaryCount`. */
+export function DataEditor({ req, onClose, onSaved }: Props) {
+  const isSecret = req.kind === "secrets";
   const seed = useMemo<Entry[]>(
     () => Object.entries(req.data).map(([key, value], i) => ({ id: i, key, value })),
     [req],
   );
   const [entries, setEntries] = useState<Entry[]>(seed);
+  const [reveal, setReveal] = useState(!isSecret);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(seed.length);
@@ -67,7 +75,8 @@ export function ConfigMapEditor({ req, onClose, onSaved }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await api.updateConfigmap(req.namespace, req.name, data);
+      if (isSecret) await api.updateSecret(req.namespace, req.name, data);
+      else await api.updateConfigmap(req.namespace, req.name, data);
       onSaved();
       onClose();
     } catch (e) {
@@ -76,10 +85,23 @@ export function ConfigMapEditor({ req, onClose, onSaved }: Props) {
     }
   }
 
+  const binaryNote = isSecret && req.binaryCount ? req.binaryCount : 0;
+
   return (
     <div className="modal-backdrop" onMouseDown={() => !busy && onClose()}>
       <div className="modal cm-editor" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">Edit ConfigMap</div>
+        <div className="modal-title-row">
+          <div className="modal-title">{isSecret ? "Edit Secret" : "Edit ConfigMap"}</div>
+          {isSecret && (
+            <button
+              className="btn sm"
+              title={reveal ? "Hide values" : "Reveal values"}
+              onClick={() => setReveal((r) => !r)}
+            >
+              {reveal ? "🙈 Hide" : "👁 Reveal"}
+            </button>
+          )}
+        </div>
         <div className="dim mono" style={{ fontSize: "0.82em", marginTop: 2 }}>
           {req.namespace}/{req.name}
         </div>
@@ -100,7 +122,7 @@ export function ConfigMapEditor({ req, onClose, onSaved }: Props) {
                 onChange={(ev) => patch(e.id, { key: ev.target.value })}
               />
               <textarea
-                className="input mono cm-value"
+                className={`input mono cm-value${isSecret && !reveal ? " masked" : ""}`}
                 placeholder="value"
                 value={e.value}
                 spellCheck={false}
@@ -121,6 +143,13 @@ export function ConfigMapEditor({ req, onClose, onSaved }: Props) {
         <button className="btn sm" style={{ marginTop: 4 }} onClick={add}>
           + Add entry
         </button>
+
+        {binaryNote > 0 && (
+          <div className="dim" style={{ fontSize: "0.8em", marginTop: 8 }}>
+            {binaryNote} binary {binaryNote === 1 ? "entry is" : "entries are"} preserved unchanged
+            (not shown here).
+          </div>
+        )}
 
         {error && <div className="modal-error">⚠ {error}</div>}
 

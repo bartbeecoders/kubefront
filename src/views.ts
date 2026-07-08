@@ -181,8 +181,8 @@ export const TABLE_VIEWS: Partial<Record<ViewKey, TableView>> = {
 /** Workload kinds that support a rolling restart (rollout-restart annotation). */
 export const RESTARTABLE_KINDS = new Set(["deployments", "statefulsets", "daemonsets"]);
 
-/** Kinds the UI can edit in place (currently only ConfigMap `data`). */
-export const EDITABLE_KINDS = new Set(["configmaps"]);
+/** Kinds the UI can edit in place (ConfigMap `data`; Secret text entries). */
+export const EDITABLE_KINDS = new Set(["configmaps", "secrets"]);
 
 /** Kinds the UI allows deleting (nodes deliberately excluded; deleting a
  *  namespace cascades to its contents and is guarded by an extra confirmation). */

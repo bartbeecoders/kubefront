@@ -87,3 +87,7 @@ Add also some other parameters to the connection:
 
 ### Terminal window
 Add a terminal window to the app that allows the user to execute kubectl commands.
+
+
+Can you add to the secrets detail page a button to decode the secret data? 
+These are sealed secrets, so you need to use the sealed-secrets controller to decode them.

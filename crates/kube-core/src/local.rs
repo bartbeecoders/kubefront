@@ -373,6 +373,50 @@ impl LocalKube {
         Ok(())
     }
 
+    /// Replace a Secret's text (UTF-8) entries from plaintext values. Binary
+    /// entries — values that aren't valid UTF-8 — are preserved untouched; the UI
+    /// only manages the text entries. The live object is read first (for its
+    /// `resourceVersion`); the text values are written via `stringData`, which the
+    /// API server base64-encodes, so text keys removed in the UI actually
+    /// disappear. `managedFields` is stripped before the write.
+    pub async fn update_secret(
+        &self,
+        namespace: &str,
+        name: &str,
+        data: BTreeMap<String, String>,
+    ) -> Result<(), CoreError> {
+        use k8s_openapi::api::core::v1::Secret;
+
+        let ns = normalize_scope(Some(namespace.to_string()))
+            .ok_or_else(|| CoreError::Other("A namespace is required to edit a secret".into()))?;
+        let api: Api<Secret> = Api::namespaced(self.client.clone(), &ns);
+
+        let mut secret = api.get(name).await.map_err(|e| kube_err("get secret", e))?;
+        // Keep only the binary (non-UTF-8) entries; the UI sends every text entry
+        // back via `stringData`, so dropping the rest makes text keys removed in
+        // the UI actually go away on the full replace.
+        let preserved: BTreeMap<String, k8s_openapi::ByteString> = secret
+            .data
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, v)| std::str::from_utf8(&v.0).is_err())
+            .collect();
+        secret.data = if preserved.is_empty() {
+            None
+        } else {
+            Some(preserved)
+        };
+        secret.string_data = if data.is_empty() { None } else { Some(data) };
+        secret.metadata.managed_fields = None;
+
+        api.replace(name, &PostParams::default(), &secret)
+            .await
+            .map_err(|e| kube_err("update secret", e))?;
+        tracing::info!("Updated secret {ns}/{name}");
+        Ok(())
+    }
+
     /// Produce a `kubectl describe pod`-style text report (status, containers,
     /// conditions and the pod's recent Events). Events are best-effort.
     pub async fn describe_pod(&self, namespace: &str, name: &str) -> Result<String, CoreError> {

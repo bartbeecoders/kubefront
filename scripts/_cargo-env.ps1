@@ -13,6 +13,40 @@
 # setting KUBEFRONT_NO_OPENSSL_WORKAROUND=1 (CI does this) or passing
 # -NoOpenSslWorkaround to the calling script.
 
+function Test-StaleTargetDir {
+    param([string]$ProjectRoot)
+
+    # Tauri bakes absolute paths into generated permission .toml files under
+    # target/debug/build/tauri-*/out/. If the project was moved to a different
+    # drive or path, those cached paths become invalid and the build fails with
+    # "failed to read plugin permissions: ... The system cannot find the path".
+    # Detect this and tell the user to run `cargo clean`.
+
+    $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $ProjectRoot "target" }
+    $TauriBuildDirs = Get-ChildItem -Path (Join-Path $TargetDir "debug\build") -Filter "tauri-*" -Directory -ErrorAction SilentlyContinue
+    if (-not $TauriBuildDirs) { return $false }
+
+    $currentDrive = $ProjectRoot.Substring(0, 2).ToUpper()  # e.g. "F:"
+    foreach ($dir in $TauriBuildDirs) {
+        $permDir = Join-Path $dir.FullName "out\permissions"
+        if (-not (Test-Path $permDir)) { continue }
+        $tomlFiles = Get-ChildItem -Path $permDir -Filter "*.toml" -Recurse -ErrorAction SilentlyContinue
+        foreach ($f in $tomlFiles) {
+            $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+            if (-not $content) { continue }
+            # Look for absolute Windows paths referencing a different drive letter.
+            $matches = [regex]::Matches($content, '([A-Za-z]):\\[^\s"''<>|]+')
+            foreach ($m in $matches) {
+                $fileDrive = $m.Groups[1].Value.ToUpper() + ":"
+                if ($fileDrive -ne $currentDrive) {
+                    return $true
+                }
+            }
+        }
+    }
+    return $false
+}
+
 function Set-KubefrontCargoEnv {
     param(
         [string]$ProjectRoot,
@@ -44,5 +78,18 @@ function Set-KubefrontCargoEnv {
         Write-Host "[env] No prebuilt OpenSSL found under $PrebuiltTarget; using default target dir."
         Write-Host "[env] If the build fails on openssl-sys, install Strawberry Perl + NASM, or"
         Write-Host "[env] restore src-tauri\target from a previous successful build."
+    }
+
+    # Guard: if the project was moved (e.g. E:\ -> F:\), stale absolute paths in
+    # Tauri's cached permission files will break the build. Detect and auto-clean.
+    $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $ProjectRoot "target" }
+    if (Test-Path $TargetDir) {
+        if (Test-StaleTargetDir -ProjectRoot $ProjectRoot) {
+            Write-Host "[env] Stale build cache detected (project moved?). Running cargo clean..." -ForegroundColor Yellow
+            cargo clean
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[env] cargo clean failed; please run it manually." -ForegroundColor Red
+            }
+        }
     }
 }

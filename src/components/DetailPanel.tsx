@@ -5,6 +5,7 @@ import type { PodRow, ResourceDetail, Selection } from "../types";
 import { DELETABLE_KINDS, EDITABLE_KINDS, RESTARTABLE_KINDS, statusClass } from "../views";
 import { CopyButton, copyText } from "./CopyButton";
 import { ManifestViewer } from "./ManifestViewer";
+import { SecretDataViewer } from "./SecretDataViewer";
 
 interface Props {
   selected: Selection | null;
@@ -32,6 +33,7 @@ export function DetailPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showManifest, setShowManifest] = useState(false);
+  const [showDecoded, setShowDecoded] = useState(false);
 
   useEffect(() => {
     if (!selected) {
@@ -155,6 +157,16 @@ export function DetailPanel({
           <Kv k="Age" v={detail.age} />
           <MapBlock title="Labels" entries={detail.labels} />
           <MapBlock title="Annotations" entries={detail.annotations} />
+          {selected.kind === "secrets" && (
+            <>
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn sm" onClick={() => setShowDecoded((s) => !s)}>
+                  {showDecoded ? "Hide" : "🔓 Decode"} data
+                </button>
+              </div>
+              {showDecoded && <SecretDataViewer manifest={detail.manifest} />}
+            </>
+          )}
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn sm" onClick={() => setShowManifest((s) => !s)}>
               {showManifest ? "Hide" : "Show"} manifest

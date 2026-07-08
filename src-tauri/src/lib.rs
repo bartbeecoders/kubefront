@@ -172,6 +172,7 @@ pub fn run() {
             commands::delete_resource,
             commands::restart_resource,
             commands::update_configmap,
+            commands::update_secret,
             commands::describe_pod,
             commands::stream_logs,
             commands::stop_logs,

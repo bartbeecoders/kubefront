@@ -572,6 +572,20 @@ pub async fn update_configmap(
     active.update_configmap(&namespace, &name, data).await
 }
 
+/// Replace a Secret's text (UTF-8) `data` entries from plaintext values (binary
+/// entries are preserved). Values are written via `stringData`; keys absent from
+/// `data` are removed.
+#[tauri::command]
+pub async fn update_secret(
+    state: State<'_, SharedBackend>,
+    namespace: String,
+    name: String,
+    data: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let active = require_active(&state).await?;
+    active.update_secret(&namespace, &name, data).await
+}
+
 /// `kubectl describe pod`-style text report (status, containers, events).
 #[tauri::command]
 pub async fn describe_pod(

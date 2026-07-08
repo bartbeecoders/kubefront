@@ -22,7 +22,8 @@ import { DetailPanel } from "./components/DetailPanel";
 import { LogWindow, type LogWindowState } from "./components/LogWindow";
 import { TerminalWindow } from "./components/TerminalWindow";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
-import { ConfigMapEditor, type ConfigMapEditRequest } from "./components/ConfigMapEditor";
+import { DataEditor, type DataEditRequest } from "./components/DataEditor";
+import { decodeSecretData } from "./components/SecretDataViewer";
 import { ConnectionEditor } from "./components/ConnectionEditor";
 import { AksWizard } from "./components/AksWizard";
 import { TextViewModal } from "./components/TextViewModal";
@@ -129,7 +130,7 @@ export default function App() {
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [editConn, setEditConn] = useState<KubeconfigEntry | null>(null);
   const [showAksWizard, setShowAksWizard] = useState(false);
-  const [editCm, setEditCm] = useState<ConfigMapEditRequest | null>(null);
+  const [editData, setEditData] = useState<DataEditRequest | null>(null);
   // Bumped to force the DetailPanel to re-fetch its manifest after an edit.
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const [describe, setDescribe] = useState<{
@@ -411,17 +412,24 @@ export default function App() {
     });
   }
 
-  /** Open the ConfigMap editor, seeding it with the live `data` map. */
-  async function requestEditConfigmap(
-    kind: string,
-    namespace: string | null,
-    name: string,
-  ) {
-    if (kind !== "configmaps" || !namespace) return;
+  /** Open the data editor for a ConfigMap or Secret, seeding it from the live
+   *  object. Secret values are base64-decoded to plaintext; binary entries are
+   *  counted (and preserved untouched by the backend on save). */
+  async function requestEdit(kind: string, namespace: string | null, name: string) {
+    if (!namespace || (kind !== "configmaps" && kind !== "secrets")) return;
     try {
       const detail = await api.getResource(kind, namespace, name);
-      const data = (JSON.parse(detail.manifest)?.data ?? {}) as Record<string, string>;
-      setEditCm({ namespace, name, data });
+      if (kind === "secrets") {
+        const { text, binaryCount, parseError } = decodeSecretData(detail.manifest);
+        if (parseError) {
+          setDataError(parseError);
+          return;
+        }
+        setEditData({ kind, namespace, name, data: text, binaryCount });
+      } else {
+        const data = (JSON.parse(detail.manifest)?.data ?? {}) as Record<string, string>;
+        setEditData({ kind, namespace, name, data });
+      }
     } catch (e) {
       setDataError(String(e));
     }
@@ -570,7 +578,7 @@ export default function App() {
             onOpenLogs={openLogs}
             onDelete={requestDelete}
             onRestart={requestRestart}
-            onEdit={requestEditConfigmap}
+            onEdit={requestEdit}
             onDescribe={openDescribe}
           />
         )}
@@ -610,10 +618,10 @@ export default function App() {
         />
       )}
 
-      {editCm && (
-        <ConfigMapEditor
-          req={editCm}
-          onClose={() => setEditCm(null)}
+      {editData && (
+        <DataEditor
+          req={editData}
+          onClose={() => setEditData(null)}
           onSaved={() => {
             setDetailReloadKey((k) => k + 1);
             refreshRef.current();

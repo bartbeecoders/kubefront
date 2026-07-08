@@ -179,6 +179,21 @@ impl RemoteKube {
         .await
     }
 
+    pub async fn update_secret(
+        &self,
+        namespace: &str,
+        name: &str,
+        data: BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        recv_empty(
+            self.http
+                .put(self.url(&format!("/api/secrets/{namespace}/{name}")))
+                .json(&data)
+                .timeout(JSON_TIMEOUT),
+        )
+        .await
+    }
+
     pub async fn describe_pod(&self, namespace: &str, name: &str) -> Result<String, String> {
         recv_text(
             self.http

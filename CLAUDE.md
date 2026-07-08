@@ -44,6 +44,8 @@ Run a single Rust test: `cargo test -p kube-core <test_name>`.
 
 Version is single-sourced across `package.json` / `tauri.conf.json` / `Cargo.*`: `npm run check-version` (CI gate), `npm run bump` to change it.
 
+Signed release builds go through the helper scripts, not `tauri build` directly: `scripts/build-release.ps1` (native Windows; needs the Windows SDK for `signtool`) and `scripts/build-release.sh` (cross-compile from Linux/macOS; needs `osslsigncode`). Both mint a **self-signed** cert (5-year), sign the binary, and emit `dist/KubeFront.exe`. See `scripts/README.md`.
+
 ## Run the backend server
 
 ```bash

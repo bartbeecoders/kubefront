@@ -116,6 +116,21 @@ impl Active {
         }
     }
 
+    pub async fn update_secret(
+        &self,
+        namespace: &str,
+        name: &str,
+        data: BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        match self {
+            Active::Local(l) => l
+                .update_secret(namespace, name, data)
+                .await
+                .map_err(|e| e.to_string()),
+            Active::Remote(r) => r.update_secret(namespace, name, data).await,
+        }
+    }
+
     pub async fn describe_pod(&self, namespace: &str, name: &str) -> Result<String, String> {
         match self {
             Active::Local(l) => l

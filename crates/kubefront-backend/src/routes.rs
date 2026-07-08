@@ -46,6 +46,7 @@ pub fn router(pool: Pool, base_path: &str) -> Router {
         )
         .route("/resources/{kind}/{name}/restart", post(restart_resource))
         .route("/configmaps/{namespace}/{name}", put(update_configmap))
+        .route("/secrets/{namespace}/{name}", put(update_secret))
         .route("/pods/{namespace}/{name}/describe", get(describe))
         .route("/pods/{namespace}/{name}/logs", get(logs));
 
@@ -182,6 +183,18 @@ async fn update_configmap(
     guard_writable(&slot)?;
     let client = slot.client().await?;
     client.update_configmap(&namespace, &name, data).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_secret(
+    State(pool): State<Pool>,
+    Path((conn, namespace, name)): Path<(String, String, String)>,
+    Json(data): Json<BTreeMap<String, String>>,
+) -> Result<StatusCode, ApiError> {
+    let slot = slot_of(&pool, &conn)?;
+    guard_writable(&slot)?;
+    let client = slot.client().await?;
+    client.update_secret(&namespace, &name, data).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

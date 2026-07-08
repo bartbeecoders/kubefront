@@ -104,6 +104,10 @@ export const api = {
   /** Replace a ConfigMap's `data` map (keys absent from `data` are removed). */
   updateConfigmap: (namespace: string, name: string, data: Record<string, string>) =>
     invoke<void>("update_configmap", { namespace, name, data }),
+  /** Replace a Secret's text entries with plaintext values (the backend base64-
+   *  encodes them via `stringData`; binary entries are preserved untouched). */
+  updateSecret: (namespace: string, name: string, data: Record<string, string>) =>
+    invoke<void>("update_secret", { namespace, name, data }),
   /** kubectl-describe-style text report for a pod (status, containers, events). */
   describePod: (namespace: string, name: string) =>
     invoke<string>("describe_pod", { namespace, name }),
