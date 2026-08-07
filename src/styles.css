@@ -416,6 +416,31 @@ th.name {
   font-weight: 600;
 }
 
+/* Sortable column headers: click cycles asc → desc → server order. */
+table.kt thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+table.kt thead th.sortable:hover {
+  color: var(--text);
+}
+.sort-mark {
+  display: inline-block;
+  width: 1.1em;
+  margin-left: 2px;
+  font-size: 0.75em;
+  color: var(--accent);
+}
+
+/* Per-table filter box (generic resource tables + nodes). */
+.table-toolbar {
+  margin-bottom: 8px;
+}
+.table-toolbar .input {
+  width: 200px;
+}
+
 /* Name cell: copy icon appears on row hover only — keeps tables quiet. */
 .name-cell {
   display: inline-flex;

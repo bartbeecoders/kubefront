@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { PodRow, Selection } from "../types";
 import { statusClass } from "../views";
+import { ariaSort, sortMark, sortRows, useTableSort } from "../tablesort";
 import { CopyButton } from "../components/CopyButton";
 
 interface Props {
@@ -17,6 +18,16 @@ interface Props {
 }
 
 export const podKey = (p: PodRow) => `${p.namespace}/${p.name}`;
+
+const POD_COLS: { label: string; cell: (p: PodRow) => string }[] = [
+  { label: "Name", cell: (p) => p.name },
+  { label: "Namespace", cell: (p) => p.namespace },
+  { label: "Status", cell: (p) => p.phase },
+  { label: "Ready", cell: (p) => p.ready },
+  { label: "Restarts", cell: (p) => String(p.restarts) },
+  { label: "Age", cell: (p) => p.age },
+  { label: "Node", cell: (p) => p.node },
+];
 
 export function podSelection(p: PodRow): Selection {
   return {
@@ -51,13 +62,23 @@ export function PodsView({
     return ["All", ...Array.from(set).sort()];
   }, [pods]);
 
+  const { sort, toggle } = useTableSort();
+
   const lower = filter.toLowerCase();
-  const filtered = pods.filter((p) => {
-    if (lower && !p.name.toLowerCase().includes(lower) && !p.namespace.toLowerCase().includes(lower))
-      return false;
-    if (nsFilter !== "All" && p.namespace !== nsFilter) return false;
-    return true;
-  });
+  const filtered = sortRows(
+    pods.filter((p) => {
+      if (
+        lower &&
+        !p.name.toLowerCase().includes(lower) &&
+        !p.namespace.toLowerCase().includes(lower)
+      )
+        return false;
+      if (nsFilter !== "All" && p.namespace !== nsFilter) return false;
+      return true;
+    }),
+    sort,
+    (p, col) => POD_COLS[col].cell(p),
+  );
 
   return (
     <div>
@@ -93,14 +114,18 @@ export function PodsView({
         <table className="kt">
           <thead>
             <tr>
-              <th className="name">Name</th>
-              <th>Namespace</th>
-              <th>Status</th>
-              <th>Ready</th>
-              <th>Restarts</th>
-              <th>Age</th>
-              <th>Node</th>
-              <th></th>
+              {POD_COLS.map((c, i) => (
+                <th
+                  key={c.label}
+                  className={`sortable${i === 0 ? " name" : ""}`}
+                  aria-sort={ariaSort(sort, i)}
+                  onClick={() => toggle(i)}
+                >
+                  {c.label}
+                  <span className="sort-mark">{sortMark(sort, i)}</span>
+                </th>
+              ))}
+              <th className="actions" />
             </tr>
           </thead>
           <tbody>
