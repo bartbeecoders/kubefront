@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo tree *)",
+      "PowerShell(npm run *)",
+      "PowerShell(cargo clippy *)"
+    ]
+  }
+}

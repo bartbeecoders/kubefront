@@ -29,3 +29,4 @@ scripts/certs/*
 !scripts/certs/.gitkeep
 
 testrun/
+Vibecoding/azure-aks-instructions.md

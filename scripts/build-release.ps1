@@ -41,66 +41,10 @@ $ReleaseDir = Join-Path $ProjectRoot "release"
 $ExePath = Join-Path $ProjectRoot "src-tauri\target\release\kube-front.exe"
 $SignedExe = Join-Path $ReleaseDir $OutputName
 
-# --- Vendored-OpenSSL build toolchain -------------------------------------------------
-# kube uses openssl-tls, and we vendor OpenSSL (compiled from source) so installers are
-# self-contained. That source build needs NASM and a NATIVE Windows perl at build time.
-# The MSYS perl bundled with Git for Windows reports $^O = "msys" and does NOT work.
-# This makes the script just-work: if a usable perl/nasm isn't on PATH, fetch portable
-# copies once into %LOCALAPPDATA%\kf-buildtools and prepend them. Skip with -SkipToolchain.
-
-function Test-NativePerl {
-    $perl = Get-Command perl -ErrorAction SilentlyContinue
-    if (-not $perl) { return $false }
-    $os = (& $perl.Source -e 'print $^O' 2>$null)
-    return ($os -eq "MSWin32")  # Strawberry/ActiveState = MSWin32; Git's MSYS perl = msys
-}
-
-function Get-PortableZip([string]$Url, [string]$Zip, [string]$DestDir, [string]$Marker) {
-    if (Test-Path $Marker) { return }
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    if (-not (Test-Path $Zip)) {
-        Write-Host "  downloading $Url" -ForegroundColor DarkGray
-        Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
-    }
-    Write-Host "  extracting to $DestDir" -ForegroundColor DarkGray
-    Expand-Archive -Path $Zip -DestinationPath $DestDir -Force
-}
-
-function Initialize-OpenSslToolchain {
-    $cache = Join-Path $env:LOCALAPPDATA "kf-buildtools"
-    New-Item -ItemType Directory -Force -Path $cache | Out-Null
-
-    if (-not (Test-NativePerl)) {
-        Write-Host "[toolchain] No native Windows perl found; using portable Strawberry Perl..." -ForegroundColor Yellow
-        $perlBin = Join-Path $cache "strawberry\perl\bin"
-        Get-PortableZip `
-            -Url "https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_53822_64bit/strawberry-perl-5.38.2.2-64bit-portable.zip" `
-            -Zip (Join-Path $cache "strawberry.zip") `
-            -DestDir (Join-Path $cache "strawberry") `
-            -Marker (Join-Path $perlBin "perl.exe")
-        # Prepend ONLY perl\bin — not strawberry's c\bin, whose gcc/ld would shadow MSVC.
-        $env:PATH = "$perlBin;$env:PATH"
-    }
-
-    if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
-        Write-Host "[toolchain] NASM not found; using portable NASM..." -ForegroundColor Yellow
-        Get-PortableZip `
-            -Url "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip" `
-            -Zip (Join-Path $cache "nasm.zip") `
-            -DestDir $cache `
-            -Marker (Join-Path $cache "nasm-2.16.03\nasm.exe")
-        $nasmDir = (Get-ChildItem -Path $cache -Filter "nasm-*" -Directory | Select-Object -First 1).FullName
-        $env:PATH = "$nasmDir;$env:PATH"
-    }
-
-    if (-not (Test-NativePerl)) { throw "Could not provision a native Windows perl for the OpenSSL build." }
-    if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { throw "Could not provision NASM for the OpenSSL build." }
-    Write-Host "[toolchain] perl -> $((Get-Command perl).Source); nasm -> $((Get-Command nasm).Source)" -ForegroundColor Green
-}
-
 Write-Host "=== KubeFront Release Build (Windows) ===" -ForegroundColor Cyan
 Set-Location $ProjectRoot
 
+. (Join-Path $PSScriptRoot "_cargo-env.ps1")
 if (-not $SkipToolchain) { Initialize-OpenSslToolchain }
 
 if ($Version) {

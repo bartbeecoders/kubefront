@@ -1,12 +1,16 @@
 #!/usr/bin/env pwsh
 #
-# Shared cargo environment setup, dot-sourced by build.ps1 / run.ps1.
+# Shared cargo environment setup, dot-sourced by build.ps1 / run.ps1 /
+# build-release.ps1 / build-testrun.ps1.
 #
-# This machine has no working Perl/NASM on PATH, so the vendored OpenSSL
-# (openssl-sys, pulled in by `kube`'s openssl-tls and reqwest's
-# native-tls-vendored) cannot build from scratch. A prebuilt vendored OpenSSL
-# already exists under src-tauri\target\ (from before the workspace split), so
-# we point cargo at that target dir to reuse it.
+# Vendored OpenSSL (openssl-sys, pulled in by kube's openssl-tls and reqwest's
+# native-tls-vendored) needs a C compiler + a *native* Windows Perl, plus NASM.
+# Git for Windows' MSYS perl does not work.
+#
+# If a previous build already left openssl-sys under src-tauri\target, we reuse
+# that target dir so Perl/NASM are not required. Otherwise we download portable
+# Strawberry Perl + NASM once into %LOCALAPPDATA%\kf-buildtools and prepend them
+# to PATH (same as build-release.ps1).
 #
 # CI runners have Strawberry Perl + NASM, so they build vendored OpenSSL
 # normally against the default repo-root target. Skip the override there by
@@ -47,11 +51,76 @@ function Test-StaleTargetDir {
     return $false
 }
 
+function Test-NativePerl {
+    $perl = Get-Command perl -ErrorAction SilentlyContinue
+    if (-not $perl) { return $false }
+    $os = (& $perl.Source -e 'print $^O' 2>$null)
+    return ($os -eq "MSWin32")  # Strawberry/ActiveState = MSWin32; Git's MSYS perl = msys
+}
+
+function Get-PortableZip([string]$Url, [string]$Zip, [string]$DestDir, [string]$Marker) {
+    if (Test-Path $Marker) { return }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    if (-not (Test-Path $Zip)) {
+        Write-Host "  downloading $Url" -ForegroundColor DarkGray
+        Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing
+    }
+    Write-Host "  extracting to $DestDir" -ForegroundColor DarkGray
+    New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+    Expand-Archive -Path $Zip -DestinationPath $DestDir -Force
+}
+
+function Initialize-OpenSslToolchain {
+    $cache = Join-Path $env:LOCALAPPDATA "kf-buildtools"
+    New-Item -ItemType Directory -Force -Path $cache | Out-Null
+
+    if (-not (Test-NativePerl)) {
+        Write-Host "[toolchain] No native Windows perl found; using portable Strawberry Perl..." -ForegroundColor Yellow
+        $perlBin = Join-Path $cache "strawberry\perl\bin"
+        Get-PortableZip `
+            -Url "https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_53822_64bit/strawberry-perl-5.38.2.2-64bit-portable.zip" `
+            -Zip (Join-Path $cache "strawberry.zip") `
+            -DestDir (Join-Path $cache "strawberry") `
+            -Marker (Join-Path $perlBin "perl.exe")
+        # Prepend ONLY perl\bin — not strawberry's c\bin, whose gcc/ld would shadow MSVC.
+        $env:PATH = "$perlBin;$env:PATH"
+    }
+
+    if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+        Write-Host "[toolchain] NASM not found; using portable NASM..." -ForegroundColor Yellow
+        Get-PortableZip `
+            -Url "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip" `
+            -Zip (Join-Path $cache "nasm.zip") `
+            -DestDir $cache `
+            -Marker (Join-Path $cache "nasm-2.16.03\nasm.exe")
+        $nasmDir = (Get-ChildItem -Path $cache -Filter "nasm-*" -Directory | Select-Object -First 1).FullName
+        $env:PATH = "$nasmDir;$env:PATH"
+    }
+
+    if (-not (Test-NativePerl)) { throw "Could not provision a native Windows perl for the OpenSSL build." }
+    if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { throw "Could not provision NASM for the OpenSSL build." }
+    Write-Host "[toolchain] perl -> $((Get-Command perl).Source); nasm -> $((Get-Command nasm).Source)" -ForegroundColor Green
+}
+
 function Set-KubefrontCargoEnv {
     param(
         [string]$ProjectRoot,
         [switch]$NoWorkaround
     )
+
+    # rustup puts cargo on the *user* PATH; existing terminals (and this script
+    # when launched from one) will not see it until PATH is refreshed.
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+        if (Test-Path (Join-Path $cargoBin "cargo.exe")) {
+            $env:Path = "$cargoBin;$env:Path"
+            Write-Host "[env] Added $cargoBin to PATH for this session."
+        }
+        else {
+            Write-Host "[env] cargo not found. Install Rust (https://rustup.rs/) and open a new terminal." -ForegroundColor Red
+            throw "cargo is not installed or not on PATH"
+        }
+    }
 
     if ($NoWorkaround -or $env:KUBEFRONT_NO_OPENSSL_WORKAROUND -eq "1") {
         Write-Host "[env] OpenSSL workaround disabled; using default cargo target dir."
@@ -75,9 +144,8 @@ function Set-KubefrontCargoEnv {
         Write-Host "[env] Reusing prebuilt vendored OpenSSL: CARGO_TARGET_DIR=$PrebuiltTarget"
     }
     else {
-        Write-Host "[env] No prebuilt OpenSSL found under $PrebuiltTarget; using default target dir."
-        Write-Host "[env] If the build fails on openssl-sys, install Strawberry Perl + NASM, or"
-        Write-Host "[env] restore src-tauri\target from a previous successful build."
+        Write-Host "[env] No prebuilt OpenSSL found under $PrebuiltTarget; building vendored OpenSSL from source."
+        Initialize-OpenSslToolchain
     }
 
     # Guard: if the project was moved (e.g. E:\ -> F:\), stale absolute paths in

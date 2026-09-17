@@ -17,8 +17,9 @@
 #   .\scripts\build.ps1 -NoOpenSslWorkaround   # CI: build vendored OpenSSL normally
 #   .\scripts\build.ps1 -CertPath C:\NetData\CodeCertificates\CodeSign.pfx -CertPassword ''  # sign .exe files
 #
-# OpenSSL note: locally this reuses the prebuilt vendored OpenSSL under
-# src-tauri\target (no Perl/NASM needed). See scripts\_cargo-env.ps1.
+# OpenSSL note: locally this reuses a prebuilt vendored OpenSSL under
+# src-tauri\target when present; otherwise it fetches portable Perl/NASM.
+# See scripts\_cargo-env.ps1.
 
 [CmdletBinding()]
 param(

@@ -70,7 +70,7 @@ function Stop-KubefrontProcesses {
 
 Stop-KubefrontProcesses -ProjectRoot $ProjectRoot
 
-# Reuse the prebuilt vendored OpenSSL locally (no Perl/NASM needed).
+# Reuse a prebuilt vendored OpenSSL if present; otherwise fetch portable Perl/NASM.
 . (Join-Path $PSScriptRoot "_cargo-env.ps1")
 Set-KubefrontCargoEnv -ProjectRoot $ProjectRoot
 
